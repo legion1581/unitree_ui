@@ -1,0 +1,60 @@
+
+> unitree-ui@0.1.0 start:no-ble
+> bash start.sh --no-ble
+
+[start] Installing Python dependencies...
+Requirement already satisfied: fastapi>=0.110.0 in /home/jules/.local/lib/python3.12/site-packages (from -r /app/server/requirements.txt (line 1)) (0.136.3)
+Requirement already satisfied: uvicorn>=0.27.0 in /home/jules/.local/lib/python3.12/site-packages (from -r /app/server/requirements.txt (line 2)) (0.49.0)
+Requirement already satisfied: websockets>=11.0 in /home/jules/.local/lib/python3.12/site-packages (from -r /app/server/requirements.txt (line 4)) (16.0)
+Requirement already satisfied: bleak>=0.22.0 in /home/jules/.local/lib/python3.12/site-packages (from -r /app/server/requirements.txt (line 5)) (3.0.2)
+Requirement already satisfied: pycryptodome>=3.20.0 in /home/jules/.local/lib/python3.12/site-packages (from -r /app/server/requirements.txt (line 6)) (3.23.0)
+Requirement already satisfied: pygatt>=4.0.0 in /home/jules/.local/lib/python3.12/site-packages (from -r /app/server/requirements.txt (line 7)) (5.0.0)
+Requirement already satisfied: starlette>=0.46.0 in /home/jules/.local/lib/python3.12/site-packages (from fastapi>=0.110.0->-r /app/server/requirements.txt (line 1)) (1.2.1)
+Requirement already satisfied: pydantic>=2.9.0 in /home/jules/.local/lib/python3.12/site-packages (from fastapi>=0.110.0->-r /app/server/requirements.txt (line 1)) (2.13.4)
+Requirement already satisfied: typing-extensions>=4.8.0 in /home/jules/.pyenv/versions/3.12.13/lib/python3.12/site-packages (from fastapi>=0.110.0->-r /app/server/requirements.txt (line 1)) (4.15.0)
+Requirement already satisfied: typing-inspection>=0.4.2 in /home/jules/.local/lib/python3.12/site-packages (from fastapi>=0.110.0->-r /app/server/requirements.txt (line 1)) (0.4.2)
+Requirement already satisfied: annotated-doc>=0.0.2 in /home/jules/.local/lib/python3.12/site-packages (from fastapi>=0.110.0->-r /app/server/requirements.txt (line 1)) (0.0.4)
+Requirement already satisfied: click>=7.0 in /home/jules/.local/lib/python3.12/site-packages (from uvicorn>=0.27.0->-r /app/server/requirements.txt (line 2)) (8.4.1)
+Requirement already satisfied: h11>=0.8 in /home/jules/.local/lib/python3.12/site-packages (from uvicorn>=0.27.0->-r /app/server/requirements.txt (line 2)) (0.16.0)
+Requirement already satisfied: dbus-fast>=1.83.0 in /home/jules/.local/lib/python3.12/site-packages (from bleak>=0.22.0->-r /app/server/requirements.txt (line 5)) (5.0.19)
+Requirement already satisfied: pyserial in /home/jules/.local/lib/python3.12/site-packages (from pygatt>=4.0.0->-r /app/server/requirements.txt (line 7)) (3.5)
+Requirement already satisfied: enum-compat in /home/jules/.local/lib/python3.12/site-packages (from pygatt>=4.0.0->-r /app/server/requirements.txt (line 7)) (0.0.3)
+Requirement already satisfied: annotated-types>=0.6.0 in /home/jules/.local/lib/python3.12/site-packages (from pydantic>=2.9.0->fastapi>=0.110.0->-r /app/server/requirements.txt (line 1)) (0.7.0)
+Requirement already satisfied: pydantic-core==2.46.4 in /home/jules/.local/lib/python3.12/site-packages (from pydantic>=2.9.0->fastapi>=0.110.0->-r /app/server/requirements.txt (line 1)) (2.46.4)
+Requirement already satisfied: anyio<5,>=3.6.2 in /home/jules/.local/lib/python3.12/site-packages (from starlette>=0.46.0->fastapi>=0.110.0->-r /app/server/requirements.txt (line 1)) (4.13.0)
+Requirement already satisfied: idna>=2.8 in /home/jules/.local/lib/python3.12/site-packages (from anyio<5,>=3.6.2->starlette>=0.46.0->fastapi>=0.110.0->-r /app/server/requirements.txt (line 1)) (3.18)
+
+[notice] A new release of pip is available: 26.0.1 -> 26.1.2
+[notice] To update, run: pip install --upgrade pip
+[start] Starting Vite dev server...
+
+  VITE v6.4.1  ready in 211 ms
+
+  ->  Local:   http://localhost:5173/
+  ->  Network: http://192.168.0.2:5173/
+10:47:34 AM [vite] ws proxy error:
+Error: connect ECONNREFUSED 127.0.0.1:5051
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+10:47:35 AM [vite] ws proxy error:
+Error: connect ECONNREFUSED 127.0.0.1:5051
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+10:47:37 AM [vite] ws proxy error:
+Error: connect ECONNREFUSED 127.0.0.1:5051
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+10:47:41 AM [vite] ws proxy error:
+Error: connect ECONNREFUSED 127.0.0.1:5051
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+10:47:49 AM [vite] ws proxy error:
+Error: connect ECONNREFUSED 127.0.0.1:5051
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+10:47:59 AM [vite] ws proxy error:
+Error: connect ECONNREFUSED 127.0.0.1:5051
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+10:48:22 AM [vite] ws proxy error:
+Error: connect ECONNREFUSED 127.0.0.1:5051
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+10:51:05 AM [vite] ws proxy error:
+Error: connect ECONNREFUSED 127.0.0.1:5051
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+10:53:55 AM [vite] (client) page reload src/ui/app.ts
+10:57:41 AM [vite] (client) page reload src/ui/app.ts

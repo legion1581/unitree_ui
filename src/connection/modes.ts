@@ -4,6 +4,7 @@ export const MODE_LABELS: Record<ConnectionMode, string> = {
   'STA-L': 'Local Network',
   'AP': 'Access Point (Direct)',
   'STA-T': 'Remote',
+  'CUSTOM': 'Custom Robot (WebSocket)',
 };
 
 export const DEFAULT_AP_IP = '192.168.12.1';

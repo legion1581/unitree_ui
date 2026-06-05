@@ -22,6 +22,7 @@ import { btBackend } from '../api/bt-backend';
 import { cloudApi } from '../api/unitree-cloud';
 import { theme } from './theme';
 import { connectLocal } from '../connection/local-connector';
+import { CustomWebSocketConnection } from '../connection/custom-ws';
 import { promptAesKey } from './components/aes-key-prompt';
 import { connectRemote, loginWithEmail } from '../connection/remote-connector';
 import { DataChannelHandler } from '../protocol/data-channel';
@@ -978,10 +979,47 @@ export class App {
 
   // ── Joystick Publishing Loop ──
 
+  private customSeq = 0;
+  private customMode = 'sleep';
+
   private startJoystickLoop(): void {
     this.joystickTimer = setInterval(() => {
       // Gamepad active → publish its state on the same 20 Hz cadence.
       if (this.activeSourceId?.startsWith('gamepad:') && this.gamepadManager?.currentState) {
+        if (this.connectionConfig?.mode === 'CUSTOM') {
+          // Custom WebSocket payload
+          const gpMatch = this.activeSourceId.match(/^gamepad:(\d+)$/);
+          const gpIndex = gpMatch ? parseInt(gpMatch[1], 10) : null;
+          // activeSourceId maps to 'gamepad:0', 'gamepad:1' etc.
+          const gp = navigator.getGamepads().find(g => g && (gpIndex !== null ? g.index === gpIndex : g.id === this.gamepadManager?.currentState?.id));
+          if (gp) {
+            const vx = gp.axes.length > 1 ? -gp.axes[1] : 0;
+            const vy = gp.axes.length > 0 ? gp.axes[0] : 0;
+            const wz = gp.axes.length > 2 ? gp.axes[2] : 0;
+            const deadman = gp.axes.length > 4 ? gp.axes[4] > 0.0 : false;
+
+            const b = gp.buttons;
+            if (b[0]?.pressed) this.customMode = 'sleep';
+            if (b[1]?.pressed) this.customMode = 'stand';
+            if (b[2]?.pressed) this.customMode = 'move';
+
+            const payload = {
+              seq: this.customSeq++,
+              t_ms: Date.now(),
+              deadman,
+              vx,
+              vy,
+              wz,
+              mode: this.customMode,
+            };
+
+            if (this.webrtc && typeof (this.webrtc as any).send === 'function') {
+              (this.webrtc as any).send(JSON.stringify(payload));
+            }
+          }
+          return;
+        }
+
         const { lx, ly, rx, ry, keys } = this.gamepadManager.currentState;
         const inUse = lx !== 0 || ly !== 0 || rx !== 0 || ry !== 0 || keys !== 0;
         if (inUse) {
@@ -998,6 +1036,24 @@ export class App {
       // BT relay subscribes to remote_state and publishes itself, so skip.
       if (this.activeSourceId?.startsWith('bt:')) return;
       // Default: on-screen joysticks.
+      if (this.connectionConfig?.mode === 'CUSTOM') {
+        const { lx, ly, rx, ry } = this.joystickState;
+
+        const payload = {
+          seq: this.customSeq++,
+          t_ms: Date.now(),
+          deadman: false, // on-screen joystick has no deadman
+          vx: ly, // ly is already inverted?
+          vy: lx,
+          wz: rx,
+          mode: this.customMode,
+        };
+
+        if (this.webrtc && typeof (this.webrtc as any).send === 'function') {
+          (this.webrtc as any).send(JSON.stringify(payload));
+        }
+        return;
+      }
       const { lx, ly, rx, ry } = this.joystickState;
       const inUse = lx !== 0 || ly !== 0 || rx !== 0 || ry !== 0;
       if (inUse) {
@@ -1934,18 +1990,27 @@ export class App {
         if (!config.token) throw new Error('Not logged in');
         if (!config.serialNumber) throw new Error('No robot selected');
         this.webrtc = await connectRemote(config.serialNumber, config.token, callbacks, onStep);
+      } else if (config.mode === 'CUSTOM') {
+        if (!config.ip) throw new Error('IP address required');
+        this.webrtc = new CustomWebSocketConnection(config.ip, callbacks) as any;
       } else {
         if (!config.ip) throw new Error('IP address required');
-        this.webrtc = await connectLocal(config.ip, config.mode, callbacks, onStep, {
+        this.webrtc = await connectLocal(config.ip, config.mode as 'STA-L' | 'AP', callbacks, onStep, {
           sn: config.serialNumber,
           promptKey: (sn, opts) => promptAesKey(sn, opts),
         });
       }
-      this.dataHandler = new DataChannelHandler(this.webrtc, callbacks);
+      if (config.mode !== 'CUSTOM') {
+        this.dataHandler = new DataChannelHandler(this.webrtc as WebRTCConnection, callbacks);
+      } else {
+        this.dataHandler = null;
+      }
       // Wire the error-message handler immediately — the robot sends its first
       // "errors" snapshot the same tick as "Validation Ok.", which is BEFORE
       // the onValidated callback runs. Don't wait for validation here.
-      this.dataHandler.onErrorMessage = (type, data) => this.errorStore.applyWireMessage(type, data);
+      if (this.dataHandler) {
+        this.dataHandler.onErrorMessage = (type, data) => this.errorStore.applyWireMessage(type, data);
+      }
     } catch (err) {
       const raw = err instanceof Error ? err.message : 'Connection failed';
       this.connectionPanel?.setStatus(friendlyConnectError(raw), 'error');
