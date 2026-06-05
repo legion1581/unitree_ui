@@ -991,7 +991,8 @@ export class App {
           const gpMatch = this.activeSourceId.match(/^gamepad:(\d+)$/);
           const gpIndex = gpMatch ? parseInt(gpMatch[1], 10) : null;
           // activeSourceId maps to 'gamepad:0', 'gamepad:1' etc.
-          const gp = navigator.getGamepads().find(g => g && (gpIndex !== null ? g.index === gpIndex : g.id === this.gamepadManager?.currentState?.id));
+          const gamepads = Array.from(navigator.getGamepads());
+          const gp = gamepads.find(g => g && (gpIndex !== null ? g.index === gpIndex : g.id === this.gamepadManager?.currentState?.id));
           if (gp) {
             const vx = gp.axes.length > 1 ? -gp.axes[1] : 0;
             const vy = gp.axes.length > 0 ? gp.axes[0] : 0;
@@ -2023,7 +2024,8 @@ export class App {
   private onStateChange(state: ConnectionState): void {
     switch (state) {
       case 'connecting':
-        this.connectionPanel?.setStatus('WebRTC connecting...', 'info');
+        const protocolName = this.connectionConfig?.mode === 'CUSTOM' ? 'WebSocket' : 'WebRTC';
+        this.connectionPanel?.setStatus(`${protocolName} connecting...`, 'info');
         break;
       case 'connected':
         this.connectionPanel?.setConnected(true);
