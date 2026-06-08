@@ -984,6 +984,14 @@ export class App {
 
   private startJoystickLoop(): void {
     this.joystickTimer = setInterval(() => {
+      // First, read gamepad if present to potentially switch activeSourceId
+      if (this.gamepadManager && this.gamepadManager.currentState && !this.activeSourceId?.startsWith('gamepad:')) {
+         const { lx, ly, rx, ry, keys } = this.gamepadManager.currentState;
+         if (lx !== 0 || ly !== 0 || rx !== 0 || ry !== 0 || keys !== 0) {
+           this.setActiveInputSource('gamepad:0');
+         }
+      }
+
       // Gamepad active → publish its state on the same 20 Hz cadence.
       if (this.activeSourceId?.startsWith('gamepad:') && this.gamepadManager?.currentState) {
         if (this.connectionConfig?.mode === 'CUSTOM') {
