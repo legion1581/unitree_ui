@@ -987,7 +987,10 @@ export class App {
       // First, read gamepad if present to potentially switch activeSourceId
       if (this.gamepadManager && this.gamepadManager.currentState && !this.activeSourceId?.startsWith('gamepad:')) {
          const { lx, ly, rx, ry, keys } = this.gamepadManager.currentState;
-         if (lx !== 0 || ly !== 0 || rx !== 0 || ry !== 0 || keys !== 0) {
+         // The FlySky FS-i6s emulator maps non-zero default values (like -1 on axes)
+         // so we don't automatically lock onto it just from jitter. But we will lock
+         // on if the user explicitly wiggles it.
+         if (Math.abs(lx) > 0.1 || Math.abs(ly) > 0.1 || Math.abs(rx) > 0.1 || Math.abs(ry) > 0.1 || keys !== 0) {
            this.setActiveInputSource('gamepad:0');
          }
       }
@@ -1002,10 +1005,12 @@ export class App {
           const gamepads = Array.from(navigator.getGamepads());
           const gp = gamepads.find(g => g && (gpIndex !== null ? g.index === gpIndex : g.id === this.gamepadManager?.currentState?.id));
           if (gp) {
+            // Note: The screenshot mentions axes[3] is assumed to be right-stick Y on this device.
+            // Adjust mapping for the non-standard FlySky FS-i6s mapping.
             const vx = gp.axes.length > 1 ? -gp.axes[1] : 0;
             const vy = gp.axes.length > 0 ? gp.axes[0] : 0;
-            const wz = gp.axes.length > 2 ? gp.axes[2] : 0;
-            const deadman = gp.axes.length > 4 ? gp.axes[4] > 0.0 : false;
+            const wz = gp.axes.length > 3 ? -gp.axes[3] : (gp.axes.length > 2 ? gp.axes[2] : 0);
+            const deadman = gp.axes.length > 4 ? gp.axes[4] > 0.0 : true; // Default true if no switch mapped
 
             const b = gp.buttons;
             if (b[0]?.pressed) this.customMode = 'sleep';
