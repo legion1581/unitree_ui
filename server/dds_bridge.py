@@ -44,6 +44,8 @@ class DDSBridgeServer:
                     )
                     # Publish to DDS
                     self.writer.write(msg)
+                    if msg.seq % 20 == 0:
+                        print(f"Forwarded to DDS: mode={msg.mode}, vx={msg.vx:.2f}, vy={msg.vy:.2f}, wz={msg.wz:.2f}, deadman={msg.deadman}", flush=True)
                 except json.JSONDecodeError:
                     print("Received invalid JSON")
                 except Exception as e:

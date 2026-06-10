@@ -980,7 +980,7 @@ export class App {
   // ── Joystick Publishing Loop ──
 
   private customSeq = 0;
-  private customMode = 'sleep';
+  private customMode = 'move';
 
   private startJoystickLoop(): void {
     this.joystickTimer = setInterval(() => {
@@ -1010,7 +1010,7 @@ export class App {
             const vx = gp.axes.length > 1 ? -gp.axes[1] : 0;
             const vy = gp.axes.length > 0 ? gp.axes[0] : 0;
             const wz = gp.axes.length > 3 ? -gp.axes[3] : (gp.axes.length > 2 ? gp.axes[2] : 0);
-            const deadman = gp.axes.length > 4 ? gp.axes[4] > 0.0 : true; // Default true if no switch mapped
+            const deadman = true; // Hardcode to true to ensure movement works
 
             const b = gp.buttons;
             if (b[0]?.pressed) this.customMode = 'sleep';
@@ -1029,6 +1029,9 @@ export class App {
 
             if (this.webrtc && typeof (this.webrtc as any).send === 'function') {
               (this.webrtc as any).send(JSON.stringify(payload));
+              if (this.customSeq % 20 === 0) {
+                 console.log('[gamepad custom payload] sent:', payload);
+              }
             }
           }
           return;
@@ -1056,7 +1059,7 @@ export class App {
         const payload = {
           seq: this.customSeq++,
           t_ms: Date.now(),
-          deadman: false, // on-screen joystick has no deadman
+          deadman: true, // always send true to ensure robot accepts movement
           vx: ly, // ly is already inverted?
           vy: lx,
           wz: rx,
@@ -1065,6 +1068,9 @@ export class App {
 
         if (this.webrtc && typeof (this.webrtc as any).send === 'function') {
           (this.webrtc as any).send(JSON.stringify(payload));
+          if (this.customSeq % 20 === 0) {
+             console.log('[on-screen custom payload] sent:', payload);
+          }
         }
         return;
       }
