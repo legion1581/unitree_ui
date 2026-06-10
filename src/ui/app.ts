@@ -981,6 +981,7 @@ export class App {
 
   private customSeq = 0;
   private customMode = 'move';
+  private customOdom: { x: number; y: number; z: number; yaw: number } | null = null;
 
   private startJoystickLoop(): void {
     this.joystickTimer = setInterval(() => {
@@ -1005,17 +1006,19 @@ export class App {
           const gamepads = Array.from(navigator.getGamepads());
           const gp = gamepads.find(g => g && (gpIndex !== null ? g.index === gpIndex : g.id === this.gamepadManager?.currentState?.id));
           if (gp) {
-            // Note: The screenshot mentions axes[3] is assumed to be right-stick Y on this device.
-            // Adjust mapping for the non-standard FlySky FS-i6s mapping.
-            const vx = gp.axes.length > 1 ? -gp.axes[1] : 0;
-            const vy = gp.axes.length > 0 ? gp.axes[0] : 0;
-            const wz = gp.axes.length > 3 ? -gp.axes[3] : (gp.axes.length > 2 ? gp.axes[2] : 0);
+            // Note: The screenshot shows Left Stick Y is moving `axes[2]` instead of `axes[1]`.
+            // We'll read both axes[1] and axes[2] so it works regardless of which stick is used.
+            const rawVy = gp.axes.length > 0 ? gp.axes[0] : 0;
+            const rawVx1 = gp.axes.length > 1 ? -gp.axes[1] : 0;
+            const rawVx2 = gp.axes.length > 2 ? -gp.axes[2] : 0;
+            // Use whichever vx axis has the larger magnitude
+            const vx = Math.abs(rawVx1) > Math.abs(rawVx2) ? rawVx1 : rawVx2;
+            const vy = rawVy;
+            const wz = gp.axes.length > 3 ? -gp.axes[3] : 0;
             const deadman = true; // Hardcode to true to ensure movement works
 
-            const b = gp.buttons;
-            if (b[0]?.pressed) this.customMode = 'sleep';
-            if (b[1]?.pressed) this.customMode = 'stand';
-            if (b[2]?.pressed) this.customMode = 'move';
+            // Force move mode so we don't accidentally get stuck in stand mode due to flipped toggle switches
+            this.customMode = 'move';
 
             const payload = {
               seq: this.customSeq++,
@@ -1031,7 +1034,34 @@ export class App {
               (this.webrtc as any).send(JSON.stringify(payload));
               if (this.customSeq % 20 === 0) {
                  console.log('[gamepad custom payload] sent:', payload);
+                 console.log('[debug gp.axes raw]', gp.axes);
+                 // Also log buttons to see if we can map them later
+                 console.log('[debug gp.buttons raw pressed states]', gp.buttons.map(btn => btn.pressed));
               }
+            }
+
+            // --- LOCAL KINEMATIC SIMULATION HACK ---
+            if (this.scene3d) {
+              if (!this.customOdom) {
+                this.customOdom = { x: 0, y: 0, z: 0, yaw: 0 };
+              }
+              const dt = 0.05; // 50ms loop matches the setInterval cadence
+              const v_forward = vx * 2.0; // scales up speed for visual effect
+              const v_side = vy * 1.0;
+              const v_turn = wz * 1.5;
+
+              this.customOdom.yaw += v_turn * dt;
+              this.customOdom.x += (Math.cos(this.customOdom.yaw) * v_forward - Math.sin(this.customOdom.yaw) * v_side) * dt;
+              this.customOdom.y += (Math.sin(this.customOdom.yaw) * v_forward + Math.cos(this.customOdom.yaw) * v_side) * dt;
+
+              const halfYaw = this.customOdom.yaw * 0.5;
+              const qw = Math.cos(halfYaw);
+              const qz = Math.sin(halfYaw);
+
+              this.scene3d.robotModel.updateOdom(
+                { x: this.customOdom.x, y: this.customOdom.y, z: 0 },
+                { x: 0, y: 0, z: qz, w: qw }
+              );
             }
           }
           return;
@@ -1072,6 +1102,31 @@ export class App {
              console.log('[on-screen custom payload] sent:', payload);
           }
         }
+
+        // --- LOCAL KINEMATIC SIMULATION HACK ---
+        if (this.scene3d) {
+          if (!this.customOdom) {
+            this.customOdom = { x: 0, y: 0, z: 0, yaw: 0 };
+          }
+          const dt = 0.05; // 50ms loop
+          const v_forward = ly * 2.0;
+          const v_side = lx * 1.0;
+          const v_turn = rx * 1.5;
+
+          this.customOdom.yaw += v_turn * dt;
+          this.customOdom.x += (Math.cos(this.customOdom.yaw) * v_forward - Math.sin(this.customOdom.yaw) * v_side) * dt;
+          this.customOdom.y += (Math.sin(this.customOdom.yaw) * v_forward + Math.cos(this.customOdom.yaw) * v_side) * dt;
+
+          const halfYaw = this.customOdom.yaw * 0.5;
+          const qw = Math.cos(halfYaw);
+          const qz = Math.sin(halfYaw);
+
+          this.scene3d.robotModel.updateOdom(
+            { x: this.customOdom.x, y: this.customOdom.y, z: 0 },
+            { x: 0, y: 0, z: qz, w: qw }
+          );
+        }
+
         return;
       }
       const { lx, ly, rx, ry } = this.joystickState;
