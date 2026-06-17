@@ -10,6 +10,7 @@ import cyclonedds.idl.types as types
 import cyclonedds.idl.annotations as annotate
 
 @dataclass
+@annotate.final
 class JoyData_(IdlStruct, typename="xterra::msg::dds_::JoyData_"):
     priority: types.uint8
     axes: types.array[types.float32, 6]
