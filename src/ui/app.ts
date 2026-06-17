@@ -1045,15 +1045,16 @@ export class App {
               vy,
               wz,
               mode: this.customMode,
+              // Send raw axes and buttons for the Xterra simulation
+              priority: 0,
+              axes: gp.axes,
+              buttons: gp.buttons.map(btn => btn.pressed ? 1 : 0),
             };
 
             if (this.webrtc && typeof (this.webrtc as any).send === 'function') {
               (this.webrtc as any).send(JSON.stringify(payload));
               if (this.customSeq % 20 === 0) {
                  console.log('[gamepad custom payload] sent:', payload);
-                 console.log('[debug gp.axes raw]', gp.axes);
-                 // Also log buttons to see if we can map them later
-                 console.log('[debug gp.buttons raw pressed states]', gp.buttons.map(btn => btn.pressed));
               }
             }
 
@@ -1111,6 +1112,11 @@ export class App {
           vy: lx,
           wz: rx,
           mode: this.customMode,
+          // Map on-screen joystick state to raw axes for Xterra fallback
+          // (assuming standard gamepad mapping: ax0=LeftX, ax1=LeftY, ax2=RightX, ax3=RightY)
+          priority: 0,
+          axes: [lx, -ly, -rx, -ry, 0, 0],
+          buttons: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
         };
 
         if (this.webrtc && typeof (this.webrtc as any).send === 'function') {

@@ -10,20 +10,16 @@ import cyclonedds.idl.types as types
 import cyclonedds.idl.annotations as annotate
 
 @dataclass
-class JoystickData(IdlStruct, typename="JoystickData"):
-    seq: types.int32
-    t_ms: types.int64
-    deadman: bool
-    vx: types.float32
-    vy: types.float32
-    wz: types.float32
-    mode: str
+class JoyData_(IdlStruct, typename="xterra::msg::dds_::JoyData_"):
+    priority: types.uint8
+    axes: types.array[types.float32, 6]
+    buttons: types.array[types.uint8, 12]
 
 class DDSBridgeServer:
     def __init__(self):
         self.participant = DomainParticipant()
         self.publisher = Publisher(self.participant)
-        self.topic = Topic(self.participant, "rt/bt_usb/joystick_data", JoystickData)
+        self.topic = Topic(self.participant, "rt/bt_usb/joystick_data", JoyData_)
         self.writer = DataWriter(self.publisher, self.topic)
 
     async def handle_client(self, websocket):
@@ -32,20 +28,34 @@ class DDSBridgeServer:
             async for message in websocket:
                 try:
                     data = json.loads(message)
+
+                    # Extract axes and buttons from the payload (default to zeros)
+                    raw_axes = data.get("axes", [])
+                    raw_buttons = data.get("buttons", [])
+
+                    # Ensure exactly 6 axes
+                    axes = [0.0] * 6
+                    for i in range(min(6, len(raw_axes))):
+                        axes[i] = float(raw_axes[i])
+
+                    # Ensure exactly 12 buttons
+                    buttons = [0] * 12
+                    for i in range(min(12, len(raw_buttons))):
+                        buttons[i] = int(bool(raw_buttons[i]))
+
                     # Construct the DDS message
-                    msg = JoystickData(
-                        seq=int(data.get("seq", 0)),
-                        t_ms=int(data.get("t_ms", 0)),
-                        deadman=bool(data.get("deadman", False)),
-                        vx=float(data.get("vx", 0.0)),
-                        vy=float(data.get("vy", 0.0)),
-                        wz=float(data.get("wz", 0.0)),
-                        mode=str(data.get("mode", "sleep"))
+                    msg = JoyData_(
+                        priority=int(data.get("priority", 0)),
+                        axes=axes,
+                        buttons=buttons
                     )
+
                     # Publish to DDS
                     self.writer.write(msg)
-                    if msg.seq % 20 == 0:
-                        print(f"Forwarded to DDS: mode={msg.mode}, vx={msg.vx:.2f}, vy={msg.vy:.2f}, wz={msg.wz:.2f}, deadman={msg.deadman}", flush=True)
+
+                    seq = int(data.get("seq", 0))
+                    if seq % 20 == 0:
+                        print(f"Forwarded to DDS: axes={[f'{a:.2f}' for a in axes]}, buttons={buttons}", flush=True)
                 except json.JSONDecodeError:
                     print("Received invalid JSON")
                 except Exception as e:
