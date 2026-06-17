@@ -1017,8 +1017,25 @@ export class App {
             const wz = gp.axes.length > 3 ? -gp.axes[3] : 0;
             const deadman = true; // Hardcode to true to ensure movement works
 
-            // Force move mode so we don't accidentally get stuck in stand mode due to flipped toggle switches
-            this.customMode = 'move';
+            const axis4 = gp.axes.length > 4 ? gp.axes[4] : 0;
+            const axis5 = gp.axes.length > 5 ? gp.axes[5] : 0;
+
+            // Determine custom mode from axis 4 (2-way) and axis 5 (3-way)
+            // Axis 4: move vs emergency stop
+            let newMode = 'sleep';
+            if (axis4 > 0.0) {
+              newMode = 'estop';
+            } else {
+              // Axis 5: sleep, stand, move
+              if (axis5 < -0.3) {
+                newMode = 'sleep';
+              } else if (axis5 > 0.3) {
+                newMode = 'move';
+              } else {
+                newMode = 'stand';
+              }
+            }
+            this.customMode = newMode;
 
             const payload = {
               seq: this.customSeq++,
