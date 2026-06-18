@@ -1,7 +1,11 @@
 import asyncio
 import json
-import websockets
 from dataclasses import dataclass
+
+from aiohttp import web
+import aiohttp_cors
+from aiortc import RTCPeerConnection, RTCSessionDescription
+
 from cyclonedds.domain import DomainParticipant
 from cyclonedds.topic import Topic
 from cyclonedds.pub import Publisher, DataWriter
@@ -16,63 +20,96 @@ class JoyData_(IdlStruct, typename="xterra::msg::dds_::JoyData_"):
     axes: types.array[types.float32, 6]
     buttons: types.array[types.uint8, 12]
 
-class DDSBridgeServer:
+pcs = set()
+
+class DDSBridge:
     def __init__(self):
         self.participant = DomainParticipant()
         self.publisher = Publisher(self.participant)
         self.topic = Topic(self.participant, "rt/bt_usb/joystick_data", JoyData_)
         self.writer = DataWriter(self.publisher, self.topic)
 
-    async def handle_client(self, websocket):
-        print(f"Client connected from {websocket.remote_address}", flush=True)
+    def handle_message(self, message):
         try:
-            async for message in websocket:
-                try:
-                    data = json.loads(message)
+            data = json.loads(message)
+            raw_axes = data.get("axes", [])
+            raw_buttons = data.get("buttons", [])
 
-                    # Extract axes and buttons from the payload (default to zeros)
-                    raw_axes = data.get("axes", [])
-                    raw_buttons = data.get("buttons", [])
+            axes = [0.0] * 6
+            for i in range(min(6, len(raw_axes))):
+                axes[i] = float(raw_axes[i])
 
-                    # Ensure exactly 6 axes
-                    axes = [0.0] * 6
-                    for i in range(min(6, len(raw_axes))):
-                        axes[i] = float(raw_axes[i])
+            buttons = [0] * 12
+            for i in range(min(12, len(raw_buttons))):
+                buttons[i] = int(bool(raw_buttons[i]))
 
-                    # Ensure exactly 12 buttons
-                    buttons = [0] * 12
-                    for i in range(min(12, len(raw_buttons))):
-                        buttons[i] = int(bool(raw_buttons[i]))
+            msg = JoyData_(
+                priority=int(data.get("priority", 0)),
+                axes=axes,
+                buttons=buttons
+            )
 
-                    # Construct the DDS message
-                    msg = JoyData_(
-                        priority=int(data.get("priority", 0)),
-                        axes=axes,
-                        buttons=buttons
-                    )
+            self.writer.write(msg)
 
-                    # Publish to DDS
-                    self.writer.write(msg)
+            seq = int(data.get("seq", 0))
+            if seq % 20 == 0:
+                print(f"Forwarded to DDS: axes={[f'{a:.2f}' for a in axes]}, buttons={buttons}", flush=True)
+        except Exception as e:
+            print(f"Error processing message: {e}")
 
-                    seq = int(data.get("seq", 0))
-                    if seq % 20 == 0:
-                        print(f"Forwarded to DDS: axes={[f'{a:.2f}' for a in axes]}, buttons={buttons}", flush=True)
-                except json.JSONDecodeError:
-                    print("Received invalid JSON")
-                except Exception as e:
-                    print(f"Error processing message: {e}")
-        except websockets.exceptions.ConnectionClosed as e:
-            print(f"Client disconnected: {e}")
-        finally:
-            print(f"Connection closed for {websocket.remote_address}")
+dds_bridge = DDSBridge()
 
-import sys
+async def offer(request):
+    params = await request.json()
+    offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
 
-async def main():
-    bridge = DDSBridgeServer()
-    print("Starting WebSocket to Cyclone DDS Bridge on 0.0.0.0:5051", flush=True)
-    async with websockets.serve(bridge.handle_client, "0.0.0.0", 5051):
-        await asyncio.Future()  # run forever
+    pc = RTCPeerConnection()
+    pcs.add(pc)
+
+    @pc.on("datachannel")
+    def on_datachannel(channel):
+        print(f"Data channel created: {channel.label}")
+        @channel.on("message")
+        def on_message(message):
+            dds_bridge.handle_message(message)
+
+    @pc.on("connectionstatechange")
+    async def on_connectionstatechange():
+        print(f"Connection state is {pc.connectionState}")
+        if pc.connectionState == "failed" or pc.connectionState == "closed":
+            await pc.close()
+            pcs.discard(pc)
+
+    await pc.setRemoteDescription(offer)
+    answer = await pc.createAnswer()
+    await pc.setLocalDescription(answer)
+
+    return web.json_response({
+        "sdp": pc.localDescription.sdp,
+        "type": pc.localDescription.type
+    })
+
+async def on_shutdown(app):
+    coros = [pc.close() for pc in pcs]
+    await asyncio.gather(*coros)
+    pcs.clear()
+
+def main():
+    app = web.Application()
+
+    cors = aiohttp_cors.setup(app, defaults={
+        "*": aiohttp_cors.ResourceOptions(
+            allow_credentials=True,
+            expose_headers="*",
+            allow_headers="*",
+        )
+    })
+
+    cors.add(app.router.add_post("/offer", offer))
+    app.on_shutdown.append(on_shutdown)
+
+    print("Starting WebRTC to Cyclone DDS Bridge on 0.0.0.0:8080", flush=True)
+    web.run_app(app, host="0.0.0.0", port=8080)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

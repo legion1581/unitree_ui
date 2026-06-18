@@ -239,11 +239,11 @@ export class ConnectionPanel {
     }
 
     if (isCustom) {
-      if (!this.ipInput.value.startsWith('ws://') && !this.ipInput.value.startsWith('wss://')) {
-        this.ipInput.value = 'ws://0.0.0.0:5051';
+      if (!this.ipInput.value.startsWith('http://') && !this.ipInput.value.startsWith('https://')) {
+        this.ipInput.value = 'http://127.0.0.1:8080';
       }
       this.ipInput.readOnly = false;
-      this.ipInput.placeholder = 'ws://0.0.0.0:5051';
+      this.ipInput.placeholder = 'http://127.0.0.1:8080';
     } else if (mode === 'AP') {
       this.ipInput.value = DEFAULT_AP_IP;
       this.ipInput.readOnly = true;

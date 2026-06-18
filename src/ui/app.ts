@@ -22,7 +22,7 @@ import { btBackend } from '../api/bt-backend';
 import { cloudApi } from '../api/unitree-cloud';
 import { theme } from './theme';
 import { connectLocal } from '../connection/local-connector';
-import { CustomWebSocketConnection } from '../connection/custom-ws';
+import { CustomWebRTCConnection } from '../connection/custom-webrtc';
 import { promptAesKey } from './components/aes-key-prompt';
 import { connectRemote, loginWithEmail } from '../connection/remote-connector';
 import { DataChannelHandler } from '../protocol/data-channel';
@@ -2090,7 +2090,7 @@ export class App {
         this.webrtc = await connectRemote(config.serialNumber, config.token, callbacks, onStep);
       } else if (config.mode === 'CUSTOM') {
         if (!config.ip) throw new Error('IP address required');
-        this.webrtc = new CustomWebSocketConnection(config.ip, callbacks) as any;
+        this.webrtc = new CustomWebRTCConnection(config.ip, callbacks) as any;
       } else {
         if (!config.ip) throw new Error('IP address required');
         this.webrtc = await connectLocal(config.ip, config.mode as 'STA-L' | 'AP', callbacks, onStep, {
