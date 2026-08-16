@@ -1,3 +1,4 @@
+import { isG1Family } from '../../api/unitree-cloud';
 import type { RobotFamily } from '../../api/unitree-cloud';
 import type { InputSource, InputSourceKind } from './side-buttons';
 import { AudioPlayer, type AudioPlayerCallbacks } from './audio-player';
@@ -120,7 +121,9 @@ export class SettingsPage {
     const content = document.createElement('div');
     content.className = 'page-content';
 
-    const isG1 = callbacks.family === 'G1';
+    const isG1 = isG1Family(callbacks.family ?? 'Go2');
+    // isG1 covers the humanoid family (G1 + R1); the waist motor is G1-only.
+    const isActualG1 = (callbacks.family ?? 'Go2') === 'G1';
 
     // ── Multimedia ── speaker + lamp (audio + lighting output).
     const multimedia = this.buildCategory('Multimedia');
@@ -188,13 +191,14 @@ export class SettingsPage {
       this.appendIfPopulated(content, navigation);
     }
 
-    // ── Other Settings ── BT Remote (both families), waist lock (G1),
+    // ── Other Settings ── BT Remote (both families), waist lock (G1 only —
+    // R1 has no waist motor and its Explorer app exposes no such control),
     // Remote Control radio (Go2), Internet Remote Connection permission.
     const other = this.buildCategory('Other Settings');
     if (callbacks.onInputSourceSelect) {
       other.appendChild(this.buildBtRemoteSection());
     }
-    if (isG1 && callbacks.onWaistLockToggle) {
+    if (isActualG1 && callbacks.onWaistLockToggle) {
       other.appendChild(this.buildToggleSection(
         'Waist Lock',
         'Locks the waist motor (demarcate_setup_machine_type.sh 6=lock / 5=unlock).',

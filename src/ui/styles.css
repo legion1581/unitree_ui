@@ -81,7 +81,10 @@ html[data-theme="light"] .landing-container {
 }
 
 /* ── Connection Screen ──
-   Family-scoped background image (Go2 / G1 hero) — mirrors the APK.
+   Family-scoped background image (Go2 / G1 / R1 hero) — mirrors the APK.
+   All three heroes carry their own blue-grey studio haze in the PNG so they
+   blend into `background-color` instead of floating on it (the R1 asset ships
+   as a bare cutout in the APK, so its haze is baked in here to match).
    Same ::before layer trick as the landing screen: the bg image is on
    a pseudo-element so filter: invert flips just the art in light mode
    without affecting the modal sitting on top. */
@@ -108,6 +111,9 @@ html[data-theme="light"] .landing-container {
 }
 .app-root.connection-screen.connection-family-g1::before {
   background-image: url('/sprites/bg_main_g1.png');
+}
+.app-root.connection-screen.connection-family-r1::before {
+  background-image: url('/sprites/bg_main_r1.png');
 }
 .app-root.connection-screen > * {
   position: relative;

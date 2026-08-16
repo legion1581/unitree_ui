@@ -2,7 +2,7 @@
  * Account Manager page — 4 tabs: Devices, Info, Account, Debug
  */
 
-import { cloudApi, getLastResponseMeta, type RobotDevice, type UserInfo, type FirmwareInfo, type TutorialGroup, type ChangelogEntry, type AppVersionInfo } from '../../api/unitree-cloud';
+import { cloudApi, getLastResponseMeta, ACCOUNT_FAMILY_LABEL, type RobotDevice, type UserInfo, type FirmwareInfo, type TutorialGroup, type ChangelogEntry, type AppVersionInfo } from '../../api/unitree-cloud';
 import { setCachedAesKey, clearCachedAesKey, rsaEncryptSn } from '../../api/aes-key-derive';
 import { buildCloudPrefsRow } from './cloud-prefs';
 import { makeCopyButton } from './copy-button';
@@ -147,7 +147,7 @@ export class AccountPage {
     // (Global / CN) picks which Unitree endpoint to hit. Both must be set
     // before login so the request fires against the right backend.
     const prefsSlot = panel.querySelector('#acct-login-prefs') as HTMLElement;
-    prefsSlot.replaceWith(buildCloudPrefsRow({ showFamily: true, showRegion: true }));
+    prefsSlot.replaceWith(buildCloudPrefsRow({ showFamily: true, showRegion: true, familyLabel: (f) => ACCOUNT_FAMILY_LABEL[f] }));
 
     const back = panel.querySelector('#acct-login-back') as HTMLButtonElement;
     back.addEventListener('click', () => this.onBack());
@@ -267,7 +267,7 @@ export class AccountPage {
     // family controls the AppName the request signs as. Same picker as
     // the login screen.
     const prefsSlot = panel.querySelector('#acct-reg-prefs') as HTMLElement;
-    prefsSlot.replaceWith(buildCloudPrefsRow({ showFamily: true, showRegion: true }));
+    prefsSlot.replaceWith(buildCloudPrefsRow({ showFamily: true, showRegion: true, familyLabel: (f) => ACCOUNT_FAMILY_LABEL[f] }));
 
     const back = panel.querySelector('#acct-reg-back') as HTMLButtonElement;
     back.addEventListener('click', () => this.renderLoggedOutScreen());

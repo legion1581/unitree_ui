@@ -1,4 +1,4 @@
-import { cloudApi, type RobotFamily } from '../../api/unitree-cloud';
+import { cloudApi, isG1Family, type RobotFamily } from '../../api/unitree-cloud';
 
 export interface SystemInfo {
   /** Connection mode (STA-L, STA-T, AP, ...). */
@@ -78,7 +78,9 @@ const MOTOR_NAMES_G1 = [
   'R Sho P', 'R Sho R', 'R Sho Y', 'R Elbow', 'R Wri R', 'R Wri P', 'R Wri Y',
 ];
 function motorNamesFor(family: RobotFamily): string[] {
-  return family === 'G1' ? MOTOR_NAMES_G1 : MOTOR_NAMES_GO2;
+  // R1 shares the G1 motor-index → name mapping (it populates a 20-DOF
+  // subset of the same 29-slot lowstate array), so it reuses MOTOR_NAMES_G1.
+  return isG1Family(family) ? MOTOR_NAMES_G1 : MOTOR_NAMES_GO2;
 }
 function motorName(family: RobotFamily, idx: number): string {
   return motorNamesFor(family)[idx] ?? `M${String(idx).padStart(2, '0')}`;
@@ -108,6 +110,28 @@ const G1_MOTOR_LAYOUT: Array<{ y: number; left: number | null; leftName?: string
   { y: 432, left: 10, leftName: 'R Ankle Pitch', right: 4, rightName: 'L Ankle Pitch' },
   { y: 472, left: 11, leftName: 'R Ankle Roll', right: 5, rightName: 'L Ankle Roll' },
   { y: 502, left: null, right: 12, rightName: 'Waist Yaw' },
+];
+
+// R1 motor layout — from the Explorer 2.1.2 apk's res/layout/include_r1_20.xml
+// (bg image = motor_r1_20.png). R1 is a 20-DOF humanoid: 12 legs + a 4-DOF
+// arm per side (shoulder P/R/Y + elbow), no waist and no wrists — so it
+// populates a subset of the same 29-slot lowstate array G1 uses (indices
+// 15-18 = left arm, 22-25 = right arm, 0-11 = legs). Left callouts are the
+// robot's RIGHT side, right callouts its LEFT (viewer-mirrored, same
+// convention as the G1 layout). y = each callout's baseline, derived from
+// the source layout's chained marginTop values (28dip rows, bottom gravity)
+// against the 204x484dip figure.
+const R1_MOTOR_LAYOUT: Array<{ y: number; left: number | null; leftName?: string; right: number | null; rightName?: string }> = [
+  { y: 68,  left: 22, leftName: 'R Sho Pitch', right: 15, rightName: 'L Sho Pitch' },
+  { y: 98,  left: 23, leftName: 'R Sho Roll',  right: 16, rightName: 'L Sho Roll' },
+  { y: 133, left: 24, leftName: 'R Sho Yaw',   right: 17, rightName: 'L Sho Yaw' },
+  { y: 168, left: 25, leftName: 'R Elbow',     right: 18, rightName: 'L Elbow' },
+  { y: 277, left: 7,  leftName: 'R Hip Roll',  right: 1,  rightName: 'L Hip Roll' },
+  { y: 310, left: 8,  leftName: 'R Hip Yaw',   right: 2,  rightName: 'L Hip Yaw' },
+  { y: 343, left: 6,  leftName: 'R Hip Pitch', right: 0,  rightName: 'L Hip Pitch' },
+  { y: 373, left: 9,  leftName: 'R Knee',      right: 3,  rightName: 'L Knee' },
+  { y: 408, left: 10, leftName: 'R Ankle Pitch', right: 4, rightName: 'L Ankle Pitch' },
+  { y: 443, left: 11, leftName: 'R Ankle Roll', right: 5, rightName: 'L Ankle Roll' },
 ];
 
 /** Render a per-motor metric value to a short label. Mirrors the
@@ -315,7 +339,7 @@ export class StatusPage {
     if (this.system.serialNumber) {
       systemRows.push(this.row('Serial Number', 'sys-sn'));
     }
-    if (family === 'G1') {
+    if (isG1Family(family)) {
       systemRows.push(this.row('Hardware Version', 'sys-hw'));
       systemRows.push(this.row('Software Version', 'sys-sw'));
       systemRows.push(this.row('Machine Type', 'sys-machine-type'));
@@ -348,7 +372,7 @@ export class StatusPage {
     // extra rows up front; setVal is a no-op until data lands so they
     // show '-' on a fresh G1 connection until the first bmsstate frame.
     // Field/index map mirrors com/unitree/g1/ui/battery/BatteryDataViewmodel.kt.
-    if (cloudApi.connectFamily === 'G1') {
+    if (isG1Family(cloudApi.connectFamily)) {
       batteryRows.push(
         this.row('Pack Voltage', 'bat-pack-voltage'),
         this.row('Cell Voltage', 'bat-bat-voltage'),
@@ -366,8 +390,14 @@ export class StatusPage {
     const motorBody = document.createElement('div');
     motorBody.className = 'status-section-body';
 
-    if (family === 'G1') {
-      this.buildG1MotorPanel(motorBody);
+    if (isG1Family(family)) {
+      const isR1 = family === 'R1';
+      this.buildHumanoidMotorPanel(motorBody, {
+        img: isR1 ? '/icons/r1/motor_humanoid_20.png' : '/icons/g1/motor_humanoid_29.png',
+        layout: isR1 ? R1_MOTOR_LAYOUT : G1_MOTOR_LAYOUT,
+        imgW: 200,
+        imgH: isR1 ? 484 : 500,
+      });
     } else {
       const motorHeader = document.createElement('div');
       motorHeader.className = 'status-motor-header';
@@ -394,7 +424,7 @@ export class StatusPage {
     // Foot-force is a quadruped concept (FR/FL/RR/RL contact). G1 publishes
     // empty footForce arrays and has dexterous hands instead — skip the
     // section entirely on humanoid families.
-    if (family !== 'G1') {
+    if (!isG1Family(family)) {
       const footSummary = document.createElement('div');
       footSummary.className = 'status-summary';
       const footLabel = document.createElement('div');
@@ -432,7 +462,7 @@ export class StatusPage {
     // gait + odom come from the arm/lowstate path instead). On G1 we
     // already surface temperature + rpy in the dedicated Body / Crotch
     // IMU sections below, so skip this section entirely.
-    if (family !== 'G1') {
+    if (!isG1Family(family)) {
       const imuRows: HTMLElement[] = [
         this.row('Robot Mode', 'imu-mode'),
         this.row('Gait Type', 'imu-gait'),
@@ -446,7 +476,7 @@ export class StatusPage {
     // G1 ships two IMUs. Surface them in their own section so the legacy
     // 'IMU & Position' block stays untouched for Go2. Source:
     // rt/lf/lowstate_doubleimu (parsed in app.ts handleDoubleImu).
-    if (family === 'G1') {
+    if (isG1Family(family)) {
       this.bodyImuSection = this.buildSection('Body IMU (Torso)', [
         this.row('Roll / Pitch / Yaw', 'imu-body-rpy'),
         this.row('Temperature', 'imu-body-temp'),
@@ -467,7 +497,7 @@ export class StatusPage {
     // LiDAR — Go2 only. G1's webview doesn't surface LiDAR/SLAM UI, and
     // its lowstate doesn't carry a lidarState payload, so the section
     // would just sit on "Waiting for LiDAR state..." indefinitely.
-    if (family !== 'G1') {
+    if (!isG1Family(family)) {
       this.lidarBody = document.createElement('div');
       this.lidarBody.className = 'status-section-body';
       const lidarWait = document.createElement('div');
@@ -529,7 +559,15 @@ export class StatusPage {
   private g1MetricTabs: HTMLButtonElement[] = [];
   private lastMotorStates: RobotStatus['motorStates'] = [];
 
-  private buildG1MotorPanel(parent: HTMLElement): void {
+  private buildHumanoidMotorPanel(
+    parent: HTMLElement,
+    figureOpts: {
+      img: string;
+      layout: Array<{ y: number; left: number | null; leftName?: string; right: number | null; rightName?: string }>;
+      imgW: number;
+      imgH: number;
+    },
+  ): void {
     // Metric switcher tabs
     const tabRow = document.createElement('div');
     tabRow.style.cssText = 'display:flex;gap:4px;flex-wrap:wrap;margin:4px 0 10px;';
@@ -554,23 +592,22 @@ export class StatusPage {
     });
     parent.appendChild(tabRow);
 
-    // Humanoid figure: the actual PNG from the apk
-    // (res/drawable-xxhdpi/motor_g1_29.png, 870x2178 px). Used at 200x500 px
-    // here, matching the 201dp x 503dp it's drawn at in include_g1_29.xml.
-    // Callouts overlay on each side at the y values from that XML's
-    // constraintGuide_begin attributes.
-    const IMG_W = 200;
-    const IMG_H = 500;
+    // Humanoid figure: the actual PNG from the apk, scaled to the same
+    // dp box the source layout draws it at (G1: motor_g1_29.png at
+    // 201x503dp from include_g1_29.xml; R1: motor_r1_20.png at 204x484dp
+    // from include_r1_20.xml). Callouts overlay on each side at the y
+    // baselines carried in the layout table.
+    const { img: imgSrc, layout, imgW: IMG_W, imgH: IMG_H } = figureOpts;
     const SLOT_W = 70;        // width of one callout column
     const TOTAL_W = IMG_W + 2 * SLOT_W;
-    const TOTAL_H = IMG_H + 30; // a little extra so the y=502 row fits
+    const TOTAL_H = IMG_H + 30; // a little extra so the bottom-most row fits
 
     const figure = document.createElement('div');
     figure.style.cssText = `position:relative;width:${TOTAL_W}px;height:${TOTAL_H}px;margin:0 auto;`;
 
     const img = document.createElement('img');
-    img.src = '/icons/g1/motor_humanoid_29.png';
-    img.alt = 'G1 humanoid';
+    img.src = imgSrc;
+    img.alt = 'Humanoid motors';
     img.style.cssText = `position:absolute;left:${SLOT_W}px;top:0;width:${IMG_W}px;height:${IMG_H}px;`;
     figure.appendChild(img);
 
@@ -586,7 +623,7 @@ export class StatusPage {
       this.g1Callouts.push({ el: box, idx });
       return box;
     };
-    for (const row of G1_MOTOR_LAYOUT) {
+    for (const row of layout) {
       if (row.left !== null) makeCallout(row.left, row.leftName ?? `M${row.left}`, 'left', row.y);
       if (row.right !== null) makeCallout(row.right, row.rightName ?? `M${row.right}`, 'right', row.y);
     }

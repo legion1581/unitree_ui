@@ -1,7 +1,7 @@
 import type { ConnectionMode, ConnectionConfig } from '../types';
 import { MODE_LABELS, DEFAULT_AP_IP } from '../connection/modes';
 import { scanForRobots, type ScanResult } from '../connection/network-scan';
-import { cloudApi, FAMILY_LABEL, type RobotDevice } from '../api/unitree-cloud';
+import { cloudApi, FAMILY_LABEL, CONNECT_FAMILIES, isG1Family, type RobotDevice } from '../api/unitree-cloud';
 import { buildCloudPrefsRow } from './components/cloud-prefs';
 
 export type ConnectHandler = (config: ConnectionConfig) => void;
@@ -147,10 +147,12 @@ export class ConnectionPanel {
     onPrefChange();
     const prefsSlot = this.container.querySelector('#conn-prefs-slot') as HTMLElement;
     // Region lives on the Account Manager login screen — Connect only needs
-    // the family switch (Go2 / G1) since it picks the visual label and the
-    // local-network scan filter.
+    // the family switch (Go2 / G1 / R1) since it picks the visual label and
+    // the local-network scan filter. R1 is offered here (CONNECT_FAMILIES)
+    // as a distinct control target even though it shares the G1 account.
     prefsSlot.replaceWith(buildCloudPrefsRow({
       showRegion: false,
+      familyValues: CONNECT_FAMILIES,
       getFamily: () => cloudApi.connectFamily,
       setFamily: (f) => cloudApi.setConnectFamily(f),
       onChange: onPrefChange,
@@ -206,11 +208,11 @@ export class ConnectionPanel {
     }
 
     ipGroup.style.display = isRemote ? 'none' : '';
-    // SN-targeted scan only matters for G1 — Go2 firmware doesn't gate
-    // multicast replies on the SN field, so the regular Scan button
-    // is sufficient there.
+    // SN-targeted scan only matters for the Explorer humanoids (G1 / R1) —
+    // Go2 firmware doesn't gate multicast replies on the SN field, so the
+    // regular Scan button is sufficient there.
     const snRow = this.container.querySelector('#scan-sn-row') as HTMLElement | null;
-    if (snRow) snRow.style.display = (!isRemote && cloudApi.connectFamily === 'G1') ? '' : 'none';
+    if (snRow) snRow.style.display = (!isRemote && isG1Family(cloudApi.connectFamily)) ? '' : 'none';
     this.robotPickerGroup.style.display = isRemote && cloudApi.isLoggedIn && this.devices.length > 1 ? '' : 'none';
 
     // Inline hint under the mode selector covers the remaining cases:

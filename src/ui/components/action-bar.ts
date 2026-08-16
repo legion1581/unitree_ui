@@ -1,5 +1,5 @@
 import { RTC_TOPIC, SPORT_CMD } from '../../protocol/topics';
-import { cloudApi, type RobotFamily } from '../../api/unitree-cloud';
+import { cloudApi, isG1Family, type RobotFamily } from '../../api/unitree-cloud';
 
 /** G1 sport-state values — the canonical string names the on-robot
  *  state machine uses. The gating rules below compare against these
@@ -43,6 +43,34 @@ export function g1ModeToState(mode: number | undefined): G1State {
     case 801:
     case 802: return G1_STATE.Run;
     case 812: return G1_STATE.Climb;
+    default:  return G1_STATE.Idle;
+  }
+}
+
+/** R1 mode→state map — a transcription of the official webview's `Yo` table
+ *  (index-BXEK_QdB.js). The webview normalises the topic the same way we do,
+ *  `mode ?? fsm_id ?? 0`, then indexes this map; anything unlisted falls
+ *  through to Idle, which simply means "no row highlights".
+ *
+ *  Note 3 → ZeroTorque (not Seating as on G1), and Run covering 811 plus the
+ *  816 / 830 / 831 aliases — on an AIR robot a request for 811 is redirected
+ *  on-robot to 830 (`AmpMotionCore::entryGuard`), so both must map to Run. */
+export function r1ModeToState(mode: number | undefined): G1State {
+  if (mode === undefined || Number.isNaN(mode)) return G1_STATE.ZeroTorque;
+  switch (mode) {
+    case 0:   return G1_STATE.ZeroTorque;
+    case 1:   return G1_STATE.Damp;
+    case 2:   return G1_STATE.Squat;
+    case 3:   return G1_STATE.ZeroTorque;
+    case 4:   return G1_STATE.Preparation;
+    case 500: return G1_STATE.Walk;
+    case 501: return G1_STATE.Walk2;
+    case 503: return G1_STATE.Dance;
+    case 706: return G1_STATE.Squat;
+    case 811:
+    case 816:
+    case 830:
+    case 831: return G1_STATE.Run;
     default:  return G1_STATE.Idle;
   }
 }
@@ -213,13 +241,14 @@ const DATA_TRUE = '{"data":true}';
 // The mode/gesture index goes in the parameter as {"data": N}, not in api_id.
 // And the topic splits by type: modes → rt/api/sport/request,
 // upper-limb gestures → rt/api/arm/request.
-const G1_STATE_API_ID = 7101;
+export const G1_STATE_API_ID = 7101;
 const G1_UPPER_LIMBS_API_ID = 7106;
 const wrap = (n: number): string => `{"data":${n}}`;
 
 // Family tagging policy: each list below is single-family.
 const GO2: ReadonlyArray<RobotFamily> = ['Go2'];
 const G1:  ReadonlyArray<RobotFamily> = ['G1'];
+const R1:  ReadonlyArray<RobotFamily> = ['R1'];
 
 /** Go2 actions (tricks/gestures) — fire to rt/api/sport/request. */
 export const GO2_ACTIONS: RobotAction[] = [
@@ -302,15 +331,79 @@ export const G1_MODES: RobotAction[] = [
   { topic: RTC_TOPIC.SPORT_MOD, apiId: G1_STATE_API_ID, param: wrap(812), g1Key: G1_STATE.Climb,       name: 'Climb',               icon: '/icons/g1/icon_model_climb.svg',       families: G1 },
 ];
 
+/** R1 actions (arm gestures) — same arm channel as G1 (rt/api/arm/request,
+ *  api_id=7106). Extracted from the Explorer 2.1.2 R1 builder `ege`
+ *  activeCmdList: identical to G1 except R1 omits the two heart gestures
+ *  (makeHeartBothHands / makeHeartSingleHands), which are dead code in the
+ *  R1 builder. Icons are shared with G1. */
+export const R1_ACTIONS: RobotAction[] = [
+  { topic: RTC_TOPIC.G1_ARM_REQUEST, apiId: G1_UPPER_LIMBS_API_ID, param: wrap(27), g1Key: 'shakeHands_1',  name: 'Handshake',     icon: '/icons/g1/icon_active_shakeHands.svg',   families: R1 },
+  { topic: RTC_TOPIC.G1_ARM_REQUEST, apiId: G1_UPPER_LIMBS_API_ID, param: wrap(18), g1Key: 'highFive',      name: 'High Five',     icon: '/icons/g1/icon_active_highFiveCmd.svg',  families: R1 },
+  { topic: RTC_TOPIC.G1_ARM_REQUEST, apiId: G1_UPPER_LIMBS_API_ID, param: wrap(19), g1Key: 'hug',           name: 'Hug',           icon: '/icons/g1/icon_active_hug.svg',          families: R1 },
+  { topic: RTC_TOPIC.G1_ARM_REQUEST, apiId: G1_UPPER_LIMBS_API_ID, param: wrap(26), g1Key: 'hightWave',     name: 'High Wave',     icon: '/icons/g1/icon_active_hightWave.svg',    families: R1 },
+  { topic: RTC_TOPIC.G1_ARM_REQUEST, apiId: G1_UPPER_LIMBS_API_ID, param: wrap(17), g1Key: 'clamp',         name: 'Clap',          icon: '/icons/g1/icon_active_clamp.svg',        families: R1 },
+  { topic: RTC_TOPIC.G1_ARM_REQUEST, apiId: G1_UPPER_LIMBS_API_ID, param: wrap(25), g1Key: 'lowWave',       name: 'Face Wave',     icon: '/icons/g1/icon_active_lowWave.svg',      families: R1 },
+  { topic: RTC_TOPIC.G1_ARM_REQUEST, apiId: G1_UPPER_LIMBS_API_ID, param: wrap(12), g1Key: 'blowKiss',      name: 'Left Kiss',     icon: '/icons/g1/icon_active_blowKiss.svg',     families: R1 },
+  { topic: RTC_TOPIC.G1_ARM_REQUEST, apiId: G1_UPPER_LIMBS_API_ID, param: wrap(24), g1Key: 'ultramanRay',   name: 'X-Ray',         icon: '/icons/g1/icon_active_ultramanRay.svg',  families: R1 },
+  { topic: RTC_TOPIC.G1_ARM_REQUEST, apiId: G1_UPPER_LIMBS_API_ID, param: wrap(15), g1Key: 'bothHandsUp',   name: 'Hands Up',      icon: '/icons/g1/icon_active_bothHandsUp.svg',  families: R1 },
+  { topic: RTC_TOPIC.G1_ARM_REQUEST, apiId: G1_UPPER_LIMBS_API_ID, param: wrap(23), g1Key: 'singleHandsUp', name: 'Right Hand Up', icon: '/icons/g1/icon_active_singleHandsUp.svg', families: R1 },
+  { topic: RTC_TOPIC.G1_ARM_REQUEST, apiId: G1_UPPER_LIMBS_API_ID, param: wrap(22), g1Key: 'refuse',        name: 'Reject',        icon: '/icons/g1/icon_active_refuse.svg',       families: R1 },
+  { topic: RTC_TOPIC.G1_ARM_REQUEST, apiId: G1_UPPER_LIMBS_API_ID, param: wrap(36), g1Key: 'forwardPush',   name: 'Forward Push',  icon: '/icons/g1/icon_active_forwardPush.svg',  families: R1 },
+  // No dedicated releaseArm icon yet — reuse shakeHands.svg as a placeholder.
+  { topic: RTC_TOPIC.G1_ARM_REQUEST, apiId: G1_UPPER_LIMBS_API_ID, param: wrap(99), g1Key: 'releaseArm',    name: 'Release Arm',   icon: '/icons/g1/icon_active_shakeHands.svg',   families: R1 },
+];
+
+/** R1 modes (persistent postures) — same sport channel as G1 (api_id=7101,
+ *  ROBOT_API_ID_LOCO_SET_FSM_ID; param {"data":<fsm_id>}).
+ *
+ *  The first four rows are the modes R1 exposes in the official app:
+ *  Damp / Zero Torque / Preparation / Run. Two R1-specific quirks vs G1:
+ *  Preparation is labelled "Lock" and Run rides on mode id 811 (not 801) —
+ *  internally the `AmpMotion22Dof` FSM state.
+ *
+ *  The remaining rows are the full R1 FSM state table (base ids plus the
+ *  dance / martial-arts motions). These are NOT in the official app — they
+ *  carry no g1Key so the action bar leaves them always-enabled for testing
+ *  (no current-mode highlight, no state gating). See docs/r1_action_list.md.
+ *  On the robot most motions are only reachable from a locomotion state
+ *  (enter Run first), and some are white-listed (armsdk: 816 / 831 only). */
+export const R1_MODES: RobotAction[] = [
+  // The four modes the official R1 webview exposes, in its order
+  // (index-BXEK_QdB.js `modelCmdList: [v, x, A, y]`).
+  { topic: RTC_TOPIC.SPORT_MOD, apiId: G1_STATE_API_ID, param: wrap(1),   g1Key: G1_STATE.Damp,        name: 'Damping',     icon: '/icons/g1/icon_model_damping.svg',    families: R1 },
+  { topic: RTC_TOPIC.SPORT_MOD, apiId: G1_STATE_API_ID, param: wrap(0),   g1Key: G1_STATE.ZeroTorque,  name: 'Zero Torque', icon: '/icons/g1/icon_model_zeroTorque.svg', families: R1 },
+  { topic: RTC_TOPIC.SPORT_MOD, apiId: G1_STATE_API_ID, param: wrap(4),   g1Key: G1_STATE.Preparation, name: 'Lock',        icon: '/icons/g1/icon_model_preparation.svg',families: R1 },
+  { topic: RTC_TOPIC.SPORT_MOD, apiId: G1_STATE_API_ID, param: wrap(811), g1Key: G1_STATE.Run,         name: 'Run',         icon: '/icons/g1/icon_model_run.svg',        families: R1 },
+
+  // Kept beyond the webview: the lie <-> stand pair and the dance / martial
+  // arts set. All are plain SetFsmId rows; the robot answers 1003 for any the
+  // firmware doesn't build (the AIR dance set is only 602 / 604 / 607).
+  { topic: RTC_TOPIC.SPORT_MOD, apiId: G1_STATE_API_ID, param: wrap(701), name: 'Stand Up',     icon: '/icons/g1/icon_model_standActive.svg', families: R1 }, // Qishen 起身
+  { topic: RTC_TOPIC.SPORT_MOD, apiId: G1_STATE_API_ID, param: wrap(702), name: 'Lie Down',     icon: '/icons/g1/icon_active_lieDown.svg',    families: R1 }, // Tangxia 躺下
+  // SitDown is an analytic state (no policy). Its own white list is empty, so
+  // you can leave it for anything; getting IN needs a state that permits it —
+  // Lock does, Damping / Run do not. Not in white_list.yaml, so the robot stops
+  // reporting fsm_id while sitting and no row will highlight.
+  { topic: RTC_TOPIC.SPORT_MOD, apiId: G1_STATE_API_ID, param: wrap(7),   name: 'Sit Down',     icon: '/icons/g1/icon_model_seating.svg',     families: R1 }, // SitDown
+  { topic: RTC_TOPIC.SPORT_MOD, apiId: G1_STATE_API_ID, param: wrap(601), name: 'Dance 1',      icon: '/icons/g1/icon_active_dance1.svg',     families: R1 }, // dance1_subject2_segment1
+  { topic: RTC_TOPIC.SPORT_MOD, apiId: G1_STATE_API_ID, param: wrap(602), name: 'Dance 2',      icon: '/icons/g1/icon_active_dance2.svg',     families: R1 }, // dance1_subject2_segment2
+  { topic: RTC_TOPIC.SPORT_MOD, apiId: G1_STATE_API_ID, param: wrap(603), name: 'Dance 3',      icon: '/icons/g1/icon_model_dance_g1.svg',    families: R1 }, // dance1_subject2_segment3
+  { topic: RTC_TOPIC.SPORT_MOD, apiId: G1_STATE_API_ID, param: wrap(604), name: 'Twist',        icon: '/icons/g1/icon_model_dance_g1.svg',    families: R1 }, // niuniuwu 扭扭舞
+  { topic: RTC_TOPIC.SPORT_MOD, apiId: G1_STATE_API_ID, param: wrap(607), name: 'Kung Fu',      icon: '/icons/g1/icon_model_combat.svg',      families: R1 }, // gongfu 功夫
+  { topic: RTC_TOPIC.SPORT_MOD, apiId: G1_STATE_API_ID, param: wrap(608), name: 'Jeet Kune Do', icon: '/icons/g1/icon_model_combat.svg',      families: R1 }, // jiequandao 截拳道
+];
+
 // Legacy aliases retained so anything importing the old names keeps working.
 export const ALL_ACTIONS = GO2_ACTIONS;
 export const ALL_MODES = GO2_MODES;
 
 /** Pick the action / mode list for the given (or current) family. */
 export function actionsForFamily(family: RobotFamily = cloudApi.connectFamily): RobotAction[] {
+  if (family === 'R1') return R1_ACTIONS;
   return family === 'G1' ? G1_ACTIONS : GO2_ACTIONS;
 }
 export function modesForFamily(family: RobotFamily = cloudApi.connectFamily): RobotAction[] {
+  if (family === 'R1') return R1_MODES;
   return family === 'G1' ? G1_MODES : GO2_MODES;
 }
 
@@ -370,6 +463,46 @@ export function actionEnabledForG1State(
   if (state === G1_STATE.Run && G1_RUN_HIDDEN_GESTURES.includes(k)) return false;
 
   return true;
+}
+
+/** `SetFsmId` (7101) status codes, from the on-robot `SetFsmIdHandler::handle`:
+ *  1001/1002 are `StateMachine::changeState()` returning false (the current
+ *  state's white/black list refused it); 1003 is the catch block, reached when
+ *  `findState(id)` returns null and it throws `"invalid fsm id: …"`. */
+export const R1_FSM_ERRORS: Record<number, string> = {
+  1001: 'transition refused by the current state',
+  1002: 'transition refused by the current state',
+  1003: 'invalid fsm id — that state does not exist on this firmware',
+};
+
+/** R1 grey-out rules, transcribed from the official webview's `OperaBar`
+ *  template — the `menu-item` class binding in index-BXEK_QdB.js, which appends
+ *  `"disable"` per condition. Of that long list only three clauses are guarded
+ *  by `series == "R1"`; every other clause is `series == "G1"` and must NOT be
+ *  applied here (that mistake is what used to grey Lock and Zero Torque in Run):
+ *
+ *    l == Damp        && row == Run                        → disable
+ *    l == ZeroTorque  && row == Run                        → disable
+ *    [Damp, ZeroTorque, Preparation].includes(l) && active → disable
+ *
+ *  Both Run rules agree with the robot: `damping.yaml` and `zero_torque.yaml`
+ *  white-list only ZeroTorque/Damping/Stance/Keep, so 811 would be refused.
+ *  The third means arm gestures only light up once the robot is actually
+ *  standing on a locomotion policy.
+ *
+ *  Note what is deliberately NOT here: the webview greys nothing based on the
+ *  full per-state transition table, which is why pressing Lock from 813 gets
+ *  you a live button and an `1001` from the FSM. We match that behaviour. */
+export function r1RowDisabled(
+  a: RobotAction,
+  state: G1State,
+  type: 'action' | 'mode',
+): boolean {
+  if (a.g1Key === G1_STATE.Run && (state === G1_STATE.Damp || state === G1_STATE.ZeroTorque)) {
+    return true;
+  }
+  return type === 'action'
+    && (state === G1_STATE.Damp || state === G1_STATE.ZeroTorque || state === G1_STATE.Preparation);
 }
 
 export type ActionCallback = (action: RobotAction) => void;
@@ -679,7 +812,7 @@ export class ActionBar {
    *  "blue" current-mode indicator in the Unitree app. G1 matches on g1Key
    *  vs the FSM state; Go2 matches on go2State vs the decoded `mode`. */
   private isCurrentMode(action: RobotAction): boolean {
-    if (cloudApi.connectFamily === 'G1') {
+    if (isG1Family(cloudApi.connectFamily)) {
       return action.g1Key !== undefined && action.g1Key === this.g1State;
     }
     return action.go2State !== undefined && action.go2State === this.go2State;
@@ -689,7 +822,12 @@ export class ActionBar {
    *  always enabled; G1 rows consult the full rule set against the
    *  most recent state pushed via setG1State(). */
   private isActionEnabled(action: RobotAction, type: 'action' | 'mode'): boolean {
-    if (cloudApi.connectFamily !== 'G1') return true;
+    // R1 has its own small rule set (r1RowDisabled) taken from the webview's
+    // OperaBar template — deliberately NOT the G1 rules below, and deliberately
+    // not the full FSM transition table: the webview leaves a row live and lets
+    // the robot answer 1001, and so do we.
+    if (cloudApi.connectFamily === 'R1') return !r1RowDisabled(action, this.g1State, type);
+    if (!isG1Family(cloudApi.connectFamily)) return true;
     return actionEnabledForG1State(action, this.g1State, type);
   }
 

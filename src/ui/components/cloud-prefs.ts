@@ -9,7 +9,7 @@
 import { cloudApi, ROBOT_FAMILIES, REGIONS, FAMILY_LABEL, type RobotFamily, type Region } from '../../api/unitree-cloud';
 
 export interface CloudPrefsOptions {
-  /** Show the Family toggle (Go2 / G1). Default true. */
+  /** Show the Family toggle. Default true. */
   showFamily?: boolean;
   /** Show the Region toggle (Global / CN). Default true. */
   showRegion?: boolean;
@@ -21,6 +21,13 @@ export interface CloudPrefsOptions {
   getFamily?: () => RobotFamily;
   /** Optional custom family setter, paired with getFamily. */
   setFamily?: (f: RobotFamily) => void;
+  /** Family values to offer. Defaults to ROBOT_FAMILIES (account families:
+   *  Go2 / G1). The Connect screen passes CONNECT_FAMILIES so it can offer
+   *  R1 as a distinct control target. */
+  familyValues?: ReadonlyArray<RobotFamily>;
+  /** Family label function. Defaults to FAMILY_LABEL. The account screen
+   *  passes ACCOUNT_FAMILY_LABEL so the G1 pill reads "G1 & R1". */
+  familyLabel?: (f: RobotFamily) => string;
 }
 
 export function buildCloudPrefsRow(options: CloudPrefsOptions = {}): HTMLElement {
@@ -28,6 +35,8 @@ export function buildCloudPrefsRow(options: CloudPrefsOptions = {}): HTMLElement
   const showRegion = options.showRegion ?? true;
   const getFamily = options.getFamily ?? (() => cloudApi.family);
   const setFamily = options.setFamily ?? ((f: RobotFamily) => cloudApi.setFamily(f));
+  const familyValues = options.familyValues ?? ROBOT_FAMILIES;
+  const familyLabel = options.familyLabel ?? ((f: RobotFamily) => FAMILY_LABEL[f]);
 
   const row = document.createElement('div');
   row.className = 'cloud-prefs-row';
@@ -76,7 +85,7 @@ export function buildCloudPrefsRow(options: CloudPrefsOptions = {}): HTMLElement
   if (showFamily) {
     row.appendChild(labeledGroup(
       'Family',
-      renderToggleGroup<RobotFamily>(ROBOT_FAMILIES, getFamily, setFamily, (v) => FAMILY_LABEL[v]),
+      renderToggleGroup<RobotFamily>(familyValues, getFamily, setFamily, familyLabel),
     ));
   }
 

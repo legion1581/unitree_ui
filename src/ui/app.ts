@@ -3,7 +3,8 @@ import { ConnectionPanel } from './connection-panel';
 import { Joystick } from './components/joystick';
 import { GamepadManager } from './components/gamepad-manager';
 import { NavBar } from './components/status-bar';
-import { ActionBar, g1ModeToState, go2DecodeState, go2McfSeedState, GO2_MCF_SEED_STATES } from './components/action-bar';
+import { ActionBar, G1_STATE, g1ModeToState, r1ModeToState, go2DecodeState, go2McfSeedState,
+  GO2_MCF_SEED_STATES, G1_STATE_API_ID, R1_FSM_ERRORS, type RobotAction } from './components/action-bar';
 import { PipCamera } from './components/pip-camera';
 import { EmergencyStop, type InputSource } from './components/side-buttons';
 import { SettingsDrawer } from './components/settings-drawer';
@@ -21,7 +22,7 @@ import { log } from './logger';
 import { ThemeToggle } from './components/theme-toggle';
 import { AccountStatusIcon } from './components/account-status-icon';
 import { btBackend } from '../api/bt-backend';
-import { cloudApi } from '../api/unitree-cloud';
+import { cloudApi, isG1Family } from '../api/unitree-cloud';
 import { theme } from './theme';
 import { connectLocal } from '../connection/local-connector';
 import { promptAesKey } from './components/aes-key-prompt';
@@ -382,7 +383,9 @@ export class App {
    *  Family pill on the cloud-prefs row. */
   private applyConnectionFamilyClass(): void {
     if (this.currentScreen !== 'connection') return;
-    const familyMod = cloudApi.connectFamily === 'G1' ? 'connection-family-g1' : 'connection-family-go2';
+    const familyMod = cloudApi.connectFamily === 'G1' ? 'connection-family-g1'
+      : cloudApi.connectFamily === 'R1' ? 'connection-family-r1'
+      : 'connection-family-go2';
     this.root.className = `app-root connection-screen ${familyMod}`;
   }
 
@@ -481,7 +484,7 @@ export class App {
     // expose any mapping UI even though the URDF includes a mid360 LiDAR
     // (verified against the decompiled APK 1.9.3 — pages/ has no mapping
     // chunk and the G1 series subscription path skips rt/utlidar/*).
-    if (cloudApi.connectFamily !== 'G1') {
+    if (!isG1Family(cloudApi.connectFamily)) {
       const mapBtn = document.createElement('button');
       mapBtn.className = `hub-btn ${needsWebRTC ? 'hub-btn-disabled' : 'hub-btn-secondary'}`;
       mapBtn.innerHTML = `<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg><span>Mapping</span>`;
@@ -493,7 +496,7 @@ export class App {
     // Demo Teaching — G1 only. Record arm/body trajectories on the robot and
     // play them back (native Explorer feature; Go2 has no equivalent). Ported
     // from com.unitree.g1_d.ui.teaching.* over the arm service (api 7106-7113).
-    if (cloudApi.connectFamily === 'G1') {
+    if (isG1Family(cloudApi.connectFamily)) {
       const teachBtn = document.createElement('button');
       teachBtn.className = `hub-btn ${needsWebRTC ? 'hub-btn-disabled' : 'hub-btn-secondary'}`;
       teachBtn.innerHTML = `<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 10 12 5 2 10l10 5 10-5z"/><path d="M6 12v5c0 1.2 2.7 3 6 3s6-1.8 6-3v-5"/><line x1="22" y1="10" x2="22" y2="15"/></svg><span>Demo Teaching</span>`;
@@ -543,7 +546,7 @@ export class App {
     // remote audio track stays muted=true, no media flows). So omit both the
     // PTT and the audio-monitor buttons on G1. The Audio Player (audiohub
     // library, over the data channel) still works on G1. Go2 keeps both.
-    const audioNavCallbacks = cloudApi.connectFamily === 'G1'
+    const audioNavCallbacks = isG1Family(cloudApi.connectFamily)
       ? {}
       : {
           onPttStart: () => this.onPttStart(),
@@ -560,7 +563,7 @@ export class App {
     // main-view and pip on tap. G1 has no 3D scene (camera is the only
     // view), so the PIP would be empty in one mode and redundant in the
     // other — skip it on humanoid families.
-    if (cloudApi.connectFamily !== 'G1') {
+    if (!isG1Family(cloudApi.connectFamily)) {
       this.pipCamera = new PipCamera(this.controlUi);
       if (this.videoStream) {
         this.pipCamera.setStream(this.videoStream);
@@ -601,6 +604,7 @@ export class App {
     w2.className = 'wrapper-2';
     this.actionBar = new ActionBar(w2, (action) => {
       if (this.isEmergencyStopped()) { this.notifyEstopBlocked(); return; }
+      if (!this.r1ClickGuard(action)) return;
       // Routing is per-row: G1 modes carry topic=SPORT_MOD with api_id=7101,
       // G1 upper-limb gestures carry topic=G1_ARM_REQUEST with api_id=7106,
       // Go2 rows have no topic and fall back to SPORT_MOD.
@@ -620,7 +624,7 @@ export class App {
       // in error_code, so the highlight only sticks if we seed go2McfLast on a
       // successful send. Track the request id; apply when its response acks 0.
       if (
-        cloudApi.connectFamily !== 'G1' &&
+        !isG1Family(cloudApi.connectFamily) &&
         this.robotState.motionMode === 'mcf' &&
         reqId !== undefined &&
         action.go2State !== undefined &&
@@ -656,7 +660,7 @@ export class App {
     }
 
     // Fetch initial states
-    if (cloudApi.connectFamily === 'G1') {
+    if (isG1Family(cloudApi.connectFamily)) {
       // G1 volume is on the voice service; no head lamp (skip vui brightness).
       this.publishRequestLogged(RTC_TOPIC.VOICE, 1005, '', { label: 'voice/get-volume' });
     } else {
@@ -741,7 +745,7 @@ export class App {
       onInternetRemoteToggle: (on: boolean) => this.sendInternetRemote(on),
       onInputSourceSelect: (id: string | null) => this.setActiveInputSource(id),
       audio: {
-        api: cloudApi.connectFamily === 'G1' ? G1_AUDIO_API : GO2_AUDIO_API,
+        api: isG1Family(cloudApi.connectFamily) ? G1_AUDIO_API : GO2_AUDIO_API,
         publishRequest: (apiId: number, payload: string) => this.publishAudioRequest(apiId, payload),
         getCachedList: () => this.audioListCache,
         onRecordStart: () => this.onAudioPlayerRecordStart(),
@@ -760,7 +764,7 @@ export class App {
    *
    *  Used on Settings-page entry and on every drawer open. */
   private probeSettingsState(): void {
-    if (cloudApi.connectFamily === 'G1') {
+    if (isG1Family(cloudApi.connectFamily)) {
       // G1's speaker volume is on the voice service (GET 1005); vui 1004
       // never answers on G1. G1 has no head lamp, so skip vui brightness.
       this.publishRequestLogged(RTC_TOPIC.VOICE, 1005, '', { label: 'voice/get-volume' });
@@ -770,7 +774,7 @@ export class App {
     }
     this.publishRequestLogged(RTC_TOPIC.OBSTACLES_AVOID, 1002, undefined, { label: 'obstacles_avoid/get-state' });
     this.publishRequestLogged(RTC_TOPIC.PERMISSION_NET, 1001, undefined, { label: 'permission_net/get' });
-    if (cloudApi.connectFamily !== 'G1') {
+    if (!isG1Family(cloudApi.connectFamily)) {
       this.runBashScript('get_rfpower.sh');
     }
   }
@@ -921,7 +925,7 @@ export class App {
     // view. Skip Scene3D / Go2.glb load; mount the fullscreen video bg
     // immediately and lock viewMode to 'video' so the rest of the UI
     // (toggle, PIP) doesn't try to swap with a non-existent canvas.
-    if (cloudApi.connectFamily === 'G1') {
+    if (isG1Family(cloudApi.connectFamily)) {
       this.viewMode = 'video';
       this.videoBg = document.createElement('video');
       this.videoBg.id = 'video-bg';
@@ -1226,7 +1230,7 @@ export class App {
     // a play_state signal on rt/audio_msg/filter. Subscribe to both.
     this.dataHandler.subscribe(RTC_TOPIC.AUDIOHUB_PLAY_STATE);
     this.dataHandler.subscribe(RTC_TOPIC.AUDIO_MSG_FILTER);
-    if (cloudApi.connectFamily === 'G1') {
+    if (isG1Family(cloudApi.connectFamily)) {
       this.dataHandler.subscribe(RTC_TOPIC.BMS_STATE);
       this.dataHandler.subscribe(RTC_TOPIC.SECONDARY_IMU);
       this.dataHandler.subscribe(RTC_TOPIC.G1_ARM_ACTION_STATE);
@@ -1264,7 +1268,7 @@ export class App {
     // G1 has dedicated hardware + software version scripts
     // (BaseRunner.GET_HARDWARE_VERSION, GET_SOFTWARE_VERSION) per
     // com/unitree/webrtc/data/BaseRunner.java in the decompiled apk.
-    if (cloudApi.connectFamily === 'G1') {
+    if (isG1Family(cloudApi.connectFamily)) {
       this.runBashScript('get_hardware_version.sh');
       this.runBashScript('get_software_version.sh');
       this.runBashScript('get_ip_address.sh');
@@ -1350,7 +1354,10 @@ export class App {
     });
     log.ui.groupEnd();
     if (code !== 0 && code !== undefined) {
-      log.ui.warn(`[${niceLabel}] api error: api_id=${apiId} code=${code}`);
+      log.ui.warn(`[${niceLabel}] api error: api_id=${apiId} code=${code}${R1_FSM_ERRORS[code] ? ` (${R1_FSM_ERRORS[code]})` : ''}`);
+      if (R1_FSM_ERRORS[code] && cloudApi.connectFamily === 'R1' && apiId === G1_STATE_API_ID) {
+        this.notifyBlocked(`Robot refused the mode change: ${R1_FSM_ERRORS[code]}`);
+      }
     }
   }
 
@@ -1494,7 +1501,7 @@ export class App {
       // Go2 lowstate carries 12 real motors followed by zeros; G1 has up to
       // 29 (12 legs + 3 waist + 14 arms). Slice family-aware so the status
       // page sees the full motor set on G1 but stays trim on Go2.
-      const motorLimit = cloudApi.connectFamily === 'G1' ? 29 : 12;
+      const motorLimit = isG1Family(cloudApi.connectFamily) ? 29 : 12;
       this.robotState.motorStates = d.motor_state.slice(0, motorLimit).map((m) => {
         // G1's per-motor temperature is an array [casing, winding]; Go2's is
         // a scalar. The summary bar only ever needs one number — pick the
@@ -1550,7 +1557,7 @@ export class App {
 
       // Voltage + temperatures shape diverges per family — see comments
       // below for the verified payload shapes.
-      if (cloudApi.connectFamily === 'G1') {
+      if (isG1Family(cloudApi.connectFamily)) {
         // G1 rt/lf/bmsstate (verified live capture):
         //   bmsvoltage: [pack_mV, bat_mV, _]   ← pack scalar at [0], bat at [1]
         //   cell_vol:   [c0_mV, c1_mV, …]      ← per-cell, padded to 40
@@ -1601,14 +1608,14 @@ export class App {
     // Body/chassis temperature for the status bar. The official webview reads
     // it from lowstate.temperature_ntc1 on Go2 (signed byte); on G1 it arrives
     // on the mainboard topic instead — see handleMainBoardState.
-    if (cloudApi.connectFamily !== 'G1' && typeof d.temperature_ntc1 === 'number') {
+    if (!isG1Family(cloudApi.connectFamily) && typeof d.temperature_ntc1 === 'number') {
       this.navBar?.setBodyTemp(signByte(d.temperature_ntc1));
     }
     // On G1 the lowstate's imu_state IS the torso ("Body") IMU. The
     // Status panel's Body IMU section reads from robotState.bodyImu, so
     // mirror the rpy+temp here. (On Go2 we don't expose a separate Body
     // section, so populating this is harmless.)
-    if (cloudApi.connectFamily === 'G1' && d.imu_state) {
+    if (isG1Family(cloudApi.connectFamily) && d.imu_state) {
       const im = d.imu_state as { rpy?: number[]; temperature?: number };
       const rpy = (im.rpy && im.rpy.length >= 3 ? im.rpy : [0, 0, 0]).slice(0, 3) as [number, number, number];
       this.robotState.bodyImu = { rpy, temp: typeof im.temperature === 'number' ? im.temperature : 0 };
@@ -1676,18 +1683,20 @@ export class App {
     if (currentMode !== undefined) this.robotState.mode = currentMode;
     if (d.gait_type !== undefined) this.robotState.gaitType = d.gait_type;
 
-    // G1 only: feed sportState into the action bar so it can grey out
+    // G1 / R1: feed sportState into the action bar so it can grey out
     // transitions the FSM would reject (Zero Torque / Preparation /
-    // Squat-Up / Lie Up need current state = Damp).
-    if (cloudApi.connectFamily === 'G1' && currentMode !== undefined) {
-      this.actionBar?.setG1State(g1ModeToState(currentMode));
+    // Squat-Up / Lie Up need current state = Damp). R1 shares the channel
+    // but has its own mode enum (Run on 811, mode 3 = ZeroTorque).
+    if (isG1Family(cloudApi.connectFamily) && currentMode !== undefined) {
+      const toState = cloudApi.connectFamily === 'R1' ? r1ModeToState : g1ModeToState;
+      this.actionBar?.setG1State(toState(currentMode));
     }
     // Go2: highlight the action-bar row matching the robot's live sport state
     // (the blue current-mode indicator). Decoded straight from
     // LF_SPORT_MOD_STATE — relies on the robot, no optimistic guessing. The
     // motion_switcher name selects the mechanism: "mcf" reports the mode in
     // error_code; the other modes report it in the small `mode` enum.
-    if (cloudApi.connectFamily !== 'G1') {
+    if (!isG1Family(cloudApi.connectFamily)) {
       this.actionBar?.setGo2State(go2DecodeState(
         { mode: d.mode, gait_type: d.gait_type, error_code: d.error_code },
         this.robotState.motionMode,
@@ -2625,7 +2634,7 @@ export class App {
     // with header.policy.priority=1 so the FSM bypasses the current
     // command queue. The old code sent Go2's StopMove + Damp on every
     // family, which G1 silently rejects with code 7404.
-    if (cloudApi.connectFamily === 'G1') {
+    if (isG1Family(cloudApi.connectFamily)) {
       this.publishRequestLogged(
         RTC_TOPIC.SPORT_MOD,
         7101,
@@ -2665,6 +2674,31 @@ export class App {
    *  once per second, auto-dismisses after ~2.5 s. Mounts onto the
    *  control overlay so it sits below the navbar's e-stop button. */
   private notifyEstopBlocked(): void {
+    this.notifyBlocked('Emergency stop engaged — swipe the red bar right to release.');
+  }
+
+  /** R1 click-time rules, mirroring the official webview's opera-bar handler
+   *  (`switch (H)` in index-BXEK_QdB.js). It greys nothing out; it just
+   *  refuses two cases on the way out:
+   *    • Zero Torque unless the robot is already damping — the webview shows
+   *      toastMsg_29 ("Please confirm that you are currently in the damping
+   *      state") and sends nothing. The robot agrees: every locomotion state
+   *      black-lists ZeroTorque, so it would answer 1001 anyway.
+   *    • Run while already running — a no-op there, so don't spam the FSM.
+   *  Returns false to swallow the click. */
+  private r1ClickGuard(action: RobotAction): boolean {
+    if (cloudApi.connectFamily !== 'R1' || action.apiId !== G1_STATE_API_ID) return true;
+    const state = r1ModeToState(this.robotState.mode);
+    if (action.g1Key === G1_STATE.ZeroTorque && state !== G1_STATE.Damp) {
+      this.notifyBlocked('Zero Torque needs the robot to be in Damping first.');
+      return false;
+    }
+    return !(action.g1Key === G1_STATE.Run && state === G1_STATE.Run);
+  }
+
+  /** Shared transient toast used by the guarded paths. Throttled to once per
+   *  second so a held joystick (or a jabbed action row) can't strobe it. */
+  private notifyBlocked(message: string): void {
     const now = performance.now();
     if (now - this.estopToastLastShownAt < 1000) return;
     this.estopToastLastShownAt = now;
@@ -2673,9 +2707,9 @@ export class App {
     if (!this.estopToastEl) {
       this.estopToastEl = document.createElement('div');
       this.estopToastEl.className = 'estop-blocked-toast';
-      this.estopToastEl.textContent = 'Emergency stop engaged — swipe the red bar right to release.';
       (this.controlUi ?? document.body).appendChild(this.estopToastEl);
     }
+    this.estopToastEl.textContent = message;
     this.estopToastEl.classList.add('show');
     this.estopToastTimer = setTimeout(() => {
       this.estopToastEl?.classList.remove('show');
@@ -2743,7 +2777,7 @@ export class App {
 
   private sendVolume(level: number): void {
     this.settingsState.volume = level;
-    if (cloudApi.connectFamily === 'G1') {
+    if (isG1Family(cloudApi.connectFamily)) {
       // G1 speaker volume is on the voice service, scale 0-100; map our 0-10
       // slider level back up (×10).
       this.publishRequestLogged(

@@ -16,20 +16,48 @@ const SIGN_SECRET = 'XyvkwK45hp5PHfA8';
 // some responses (tutorials, firmware lists, announcements) off the AppName
 // header — Go2 has its own dedicated mobile app (AppName='Go2'); G1 ships
 // in the Unitree Explorer app which identifies as 'B2' internally
-// (RetrofitFactory.java:139 in the decompiled APK). Other Explorer-line
-// models (R1 / B2 / H1) presumably share AppName='B2' but aren't on hand
-// to verify, so the choice is intentionally limited to Go2 + G1.
-export type RobotFamily = 'Go2' | 'G1';
+// (RetrofitFactory.java:139 in the decompiled APK). R1 is another
+// Explorer-line humanoid that shares AppName='B2' with G1 (verified in the
+// Explorer 2.1.2 APK: the R1 series routes through the same B2 account path
+// and the same WebRTC topic/command channels), so it is NOT a separate
+// account family — it rides on the G1 account and is chosen separately as a
+// *connect* target.
+export type RobotFamily = 'Go2' | 'G1' | 'R1';
+// Account families — cloud-account namespaces used for request signing.
+// R1 folds into the G1/Explorer account, so it isn't listed here.
 export const ROBOT_FAMILIES: ReadonlyArray<RobotFamily> = ['Go2', 'G1'];
+// Connect families — control targets the user can pick on the Connect
+// screen. R1 is a distinct humanoid (its own action set + motor figure)
+// even though it authenticates through the G1 account.
+export const CONNECT_FAMILIES: ReadonlyArray<RobotFamily> = ['Go2', 'G1', 'R1'];
 const APP_NAME: Record<RobotFamily, string> = {
   Go2: 'Go2',
   G1:  'B2',
+  R1:  'B2',
 };
-/** Human-readable label for the family pill. */
+/** Human-readable label for the connect-side family pill. */
 export const FAMILY_LABEL: Record<RobotFamily, string> = {
   Go2: 'Go2',
   G1:  'G1',
+  R1:  'R1',
 };
+/** Account-screen label — R1 shares the G1 account, so the account family
+ *  pill shows the pair rather than implying they're separate logins. */
+export const ACCOUNT_FAMILY_LABEL: Record<RobotFamily, string> = {
+  Go2: 'Go2',
+  G1:  'G1 & R1',
+  R1:  'G1 & R1',
+};
+
+/** True for the Explorer-line humanoids (G1 + R1). They share the same
+ *  WebRTC topic set, arm/sport command channels, BMS + dual-IMU payload
+ *  shapes and lowstate-driven state reading — everything that diverges
+ *  from the Go2 quadruped. Family-specific bits that differ *between* G1
+ *  and R1 (action set, motor figure, mode→state map) branch on the exact
+ *  family instead. */
+export function isG1Family(f: RobotFamily): boolean {
+  return f === 'G1' || f === 'R1';
+}
 
 // Region selects which Unitree cloud endpoint the Vite proxy forwards to.
 // Sent as the `X-Unitree-Region` header; the proxy maps it to a hostname and
@@ -276,7 +304,7 @@ function readPersistedFamily(): RobotFamily {
 function readPersistedConnectFamily(): RobotFamily {
   try {
     const v = localStorage.getItem('unitree_connect_family');
-    if (v === 'Go2' || v === 'G1') return v;
+    if (v === 'Go2' || v === 'G1' || v === 'R1') return v;
   } catch { /* ignore */ }
   return 'Go2';
 }

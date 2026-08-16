@@ -26,17 +26,29 @@ const DEFAULT_SCAN_TIMEOUT = 3000;
 const FAMILY_GROUPS: Record<string, string[]> = {
   Go2: ['231.1.1.1'],
   G1:  ['231.1.1.2', '239.255.1.1'],
+  // R1 is an Explorer-line humanoid and announces on the same multicast
+  // groups as G1 (same webrtc_dds_bridge multicast_responder.py).
+  R1:  ['231.1.1.2', '239.255.1.1'],
 };
 
 function groupsForFamily(family: string): string[] {
   return FAMILY_GROUPS[family] || FAMILY_GROUPS.Go2;
 }
 
+// Discovery bucket: the multicast groups (and thus who can reply to a scan)
+// split by chassis class, not exact family — the Explorer humanoids (G1 / R1)
+// share one group set, Go2 has its own. Used to drop genuinely cross-class
+// replies without dropping an R1 robot from a G1 scan (or vice versa).
+function familyBucket(family: string): 'go2' | 'explorer' {
+  return family === 'Go2' ? 'go2' : 'explorer';
+}
+
 // Best-effort family inference from the 16-char SN. Unitree SNs:
 //   Go2: starts with B (e.g. B42D2000OBIB1F)
 //   G1:  starts with E (e.g. E21D6000PBF9ELG5)
 // Returns null when we can't tell — those replies are let through so a new
-// SN format doesn't silently break discovery.
+// SN format doesn't silently break discovery. R1 SNs aren't reliably known,
+// so they fall through as null and are matched by group + bucket instead.
 function inferFamilyFromSn(sn: string): 'Go2' | 'G1' | null {
   const c = sn?.[0]?.toUpperCase();
   if (c === 'B') return 'Go2';
@@ -69,10 +81,11 @@ function scanForRobots(family: string, timeoutMs = DEFAULT_SCAN_TIMEOUT, sn?: st
           // robots on the same LAN that respond to broadcast queries).
           if (sn && data.sn !== sn) return;
           // Family filter: port 10134 is shared, so a Go2 announcement can
-          // arrive on a G1 scan (and vice versa). Drop replies whose SN
-          // prefix doesn't match the requested family.
+          // arrive on an Explorer scan (and vice versa). Drop replies from
+          // the other chassis bucket only — G1 and R1 share a bucket, so an
+          // R1 robot isn't dropped from a G1 scan.
           const inferred = inferFamilyFromSn(data.sn);
-          if (inferred && inferred !== family) {
+          if (inferred && familyBucket(inferred) !== familyBucket(family)) {
             console.log(`[scanner] Dropping cross-family reply: requested=${family} sn=${data.sn} (looks like ${inferred})`);
             return;
           }

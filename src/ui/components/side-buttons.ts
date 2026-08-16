@@ -39,6 +39,7 @@ const WAIST_LOCK_SVG = (color: string) => `<svg width="24" height="24" viewBox="
   <path d="M8 11V7a4 4 0 0 1 8 0v4"/>
 </svg>`;
 
+import { isG1Family } from '../../api/unitree-cloud';
 import type { RobotFamily } from '../../api/unitree-cloud';
 
 export type InputSourceKind = 'bt' | 'gamepad';
@@ -86,7 +87,9 @@ export class SettingBar {
     this.container = document.createElement('div');
     this.container.className = 'setting-bar';
 
-    const isG1 = callbacks.family === 'G1';
+    const isG1 = isG1Family(callbacks.family ?? 'Go2');
+    // Humanoid-family checks above cover G1 + R1; the waist motor is G1-only.
+    const isActualG1 = (callbacks.family ?? 'Go2') === 'G1';
 
     // Radar / LiDAR / Lamp are quadruped-only controls (obstacle avoid,
     // mid360 toggle, head-lamp brightness). G1 has no equivalents in
@@ -135,10 +138,12 @@ export class SettingBar {
       this.container.appendChild(this.lampBtn);
     }
 
-    // Waist Lock — G1 only. Fires BaseRunner.G1_SETUP_MACHINE_TYPE
-    // (script demarcate_setup_machine_type.sh) with arg "6" (lock) /
-    // "5" (unlock) per the decompiled BaseInfoViewModel.kt:570.
-    if (isG1 && callbacks.onWaistLockToggle) {
+    // Waist Lock — G1 only, and that means G1 proper, not the whole humanoid
+    // family: R1 has no waist motor and the R1 Explorer app shows no such
+    // control. Fires BaseRunner.G1_SETUP_MACHINE_TYPE (script
+    // demarcate_setup_machine_type.sh) with arg "6" (lock) / "5" (unlock)
+    // per the decompiled BaseInfoViewModel.kt:570.
+    if (isActualG1 && callbacks.onWaistLockToggle) {
       this.waistLockBtn = this.createSvgBtn(WAIST_LOCK_SVG('#666'), 'Waist Unlocked');
       this.waistLockBtn.addEventListener('click', () => {
         this.waistLocked = !this.waistLocked;

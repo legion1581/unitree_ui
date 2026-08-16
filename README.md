@@ -1,6 +1,6 @@
 # Unitree WebRTC UI
 
-A browser-based control interface for **Unitree Go2** and **Unitree G1** robots, communicating over the same WebRTC connection the official mobile apps use. No jailbreak, no firmware modification, no phone app required.
+A browser-based control interface for **Unitree Go2**, **Unitree G1**, and **Unitree R1** robots, communicating over the same WebRTC connection the official mobile apps use. No jailbreak, no firmware modification, no phone app required.
 
 Built with TypeScript, Three.js, and Vite.
 
@@ -13,8 +13,9 @@ Built with TypeScript, Three.js, and Vite.
 </p>
 
 <p align="center">
-  <img src="images/connect_go2.png" width="44%" />
-  <img src="images/connect_g1.png" width="44%" />
+  <img src="images/connect_go2.png" width="32%" />
+  <img src="images/connect_g1.png" width="32%" />
+  <img src="images/connect_r1.png" width="32%" />
 </p>
 
 ## Supported Robots
@@ -23,6 +24,12 @@ Built with TypeScript, Three.js, and Vite.
 |--------|----------|
 | **Go2** | 1.0.19 – 1.0.25, 1.1.1 – 1.1.15 *(latest)* |
 | **G1**  | 1.2.0 – 1.4.5, 1.5.1+ *(latest)* |
+| **R1**  | 1.4.2 *(latest)* |
+
+R1 shares the humanoid control channel with G1, so it inherits the same modes,
+arm gestures, status panels and e-stop. Its own FSM state ids differ — Run rides
+on 811 (`AmpMotion22Dof`) rather than 801, and it adds the dance / martial-arts
+set — all catalogued in [R1 Action List](docs/r1_action_list.md).
 
 ## Tour
 
@@ -65,14 +72,14 @@ npm run build && npm run preview
 
 - Node.js ≥ 18, npm ≥ 9
 - Chrome (Firefox is experimental, Safari untested)
-- A Unitree Go2 or G1 robot
+- A Unitree Go2, G1, or R1 robot
 
 ## Features
 
 - **Real-time 3D viewport** — robot model with live joint angles, lidar spinning animation, voxel point cloud (Go2 SLAM).
-- **Camera + dual joystick control** — PIP video, on-screen joysticks, action carousel for sport commands and modes.
+- **Camera + dual joystick control** — PIP video, on-screen joysticks, action carousel for sport commands and modes. On R1 the bar mirrors the official app (Damping / Zero Torque / Lock / Run plus the arm gestures) and adds the dance and Kung Fu / Jeet Kune Do states.
 - **Audio** — two-way over the WebRTC connection: push-to-talk megaphone broadcast from your mic, click-to-toggle monitoring of the robot's microphone, and an APK-style **Audio Player** in Controls (record clips, upload MP3/WAV — auto-converted to the robot's WAV format, play with single / list / no-loop modes, rename, delete; live play-state sync).
-- **Robot status** — battery, motors (temp / position / torque / lost packets), IMU, LiDAR, system info — family-aware fields for Go2 and G1.
+- **Robot status** — battery, motors (temp / position / torque / lost packets), IMU, LiDAR, system info — family-aware fields for Go2 and for the G1 / R1 humanoids.
 - **Error handling** — live decoding of firmware fault messages with snapshot + delta reconciliation; NavBar badge with active-count chip, click-anchored popover, transient toast on new faults, and a grouped full-screen list of every active error.
 - **Service manager** — list MCF services, start / stop with protection handling.
 - **Account manager** — Unitree cloud account: devices, firmware, tutorials, sharing, raw debug API console.
@@ -89,7 +96,8 @@ npm run build && npm run preview
 |-------|---------------|
 | [Connection](docs/connection.md) | Family selection, STA-L / AP / Remote modes, network scan, AES-128 key flow for V3-capable firmware (G1 ≥ 1.5.1, Go2 ≥ 1.1.15) |
 | [Control View](docs/control.md) | Joysticks, action bar, modes, sport command IDs, BLE remote relay |
-| [Robot Status](docs/status.md) | Battery / motor / IMU / system panels for both families |
+| [R1 Action List](docs/r1_action_list.md) | R1 FSM state table (fsm_id), SetFsmId api, dances / Kung Fu / Jeet Kune Do |
+| [Robot Status](docs/status.md) | Battery / motor / IMU / system panels for every family |
 | [Error Handling](docs/error-handling.md) | Fault wire protocol, Go2 + G1 source/code catalog, badge / popover / page UI |
 | [Service Manager](docs/services.md) | MCF service list, protection flag, start/stop |
 | [Account Manager](docs/account.md) | Cloud sign-in, devices, tutorials, debug console |
@@ -115,7 +123,7 @@ src/
 public/
   icons/            # Action and mode SVG icons
   sprites/          # UI sprites and backgrounds
-  models/           # Go2.glb / G1.glb 3D models
+  models/           # Go2.glb 3D model (the humanoids use the camera view)
 server/
   ble_server.py     # FastAPI BLE backend (scan, connect, WiFi config)
   scanner.mjs       # Standalone UDP multicast scanner (optional)

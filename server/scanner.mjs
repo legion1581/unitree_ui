@@ -25,11 +25,20 @@ import http from 'node:http';
 const FAMILY_GROUPS = {
   Go2: ['231.1.1.1'],
   G1:  ['231.1.1.2', '239.255.1.1'],
+  // R1 is an Explorer-line humanoid; same multicast groups as G1.
+  R1:  ['231.1.1.2', '239.255.1.1'],
 };
 const QUERY_PORT = 10131;
 const RECV_PORT = 10134;
 const DEFAULT_TIMEOUT = 3000;
 const HTTP_PORT = parseInt(process.env.SCANNER_PORT || '3001', 10);
+
+/** Discovery bucket: the Explorer humanoids (G1 / R1) share one multicast
+ *  group set, Go2 has its own. Used so a genuinely cross-class reply is
+ *  dropped while an R1 robot still shows up on a G1 scan (and vice versa). */
+function familyBucket(family) {
+  return family === 'Go2' ? 'go2' : 'explorer';
+}
 
 /** Best-effort family inference from the 16-char SN. Unitree SNs:
  *    Go2: starts with B (e.g. B42D2000OBIB1F)
@@ -71,10 +80,11 @@ function scanForRobots(family = 'Go2', timeoutMs = DEFAULT_TIMEOUT, sn) {
         if (data.sn && data.ip && !seen.has(data.sn)) {
           if (sn && data.sn !== sn) return;
           // Family filter: port 10134 is shared, so a Go2 announcement can
-          // arrive on a G1 scan (and vice versa). Drop replies whose SN
-          // prefix doesn't match the requested family.
+          // arrive on an Explorer scan (and vice versa). Drop replies from
+          // the other chassis bucket only — G1 and R1 share a bucket, so an
+          // R1 robot isn't dropped from a G1 scan.
           const inferred = inferFamilyFromSn(data.sn);
-          if (inferred && inferred !== family) {
+          if (inferred && familyBucket(inferred) !== familyBucket(family)) {
             console.log(`[scanner] Dropping cross-family reply: requested=${family} sn=${data.sn} (looks like ${inferred})`);
             return;
           }
