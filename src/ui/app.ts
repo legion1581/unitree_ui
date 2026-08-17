@@ -25,6 +25,7 @@ import { btBackend } from '../api/bt-backend';
 import { cloudApi, isG1Family } from '../api/unitree-cloud';
 import { theme } from './theme';
 import { connectLocal } from '../connection/local-connector';
+import { CustomWebRTCConnection } from '../connection/custom-webrtc';
 import { promptAesKey } from './components/aes-key-prompt';
 import { connectRemote, loginWithEmail } from '../connection/remote-connector';
 import { DataChannelHandler } from '../protocol/data-channel';
@@ -1076,10 +1077,112 @@ export class App {
 
   // ── Joystick Publishing Loop ──
 
+  private customSeq = 0;
+  private customMode = 'move';
+  private customOdom: { x: number; y: number; z: number; yaw: number } | null = null;
+
   private startJoystickLoop(): void {
     this.joystickTimer = setInterval(() => {
+      // First, read gamepad if present to potentially switch activeSourceId
+      if (this.gamepadManager && this.gamepadManager.currentState && !this.activeSourceId?.startsWith('gamepad:')) {
+         const { lx, ly, rx, ry, keys } = this.gamepadManager.currentState;
+         // The FlySky FS-i6s emulator maps non-zero default values (like -1 on axes)
+         // so we don't automatically lock onto it just from jitter. But we will lock
+         // on if the user explicitly wiggles it.
+         if (Math.abs(lx) > 0.1 || Math.abs(ly) > 0.1 || Math.abs(rx) > 0.1 || Math.abs(ry) > 0.1 || keys !== 0) {
+           this.setActiveInputSource('gamepad:0');
+         }
+      }
+
       // Gamepad active → publish its state on the same 20 Hz cadence.
       if (this.activeSourceId?.startsWith('gamepad:') && this.gamepadManager?.currentState) {
+        if (this.connectionConfig?.mode === 'CUSTOM') {
+          // Custom WebSocket payload
+          const gpMatch = this.activeSourceId.match(/^gamepad:(\d+)$/);
+          const gpIndex = gpMatch ? parseInt(gpMatch[1], 10) : null;
+          // activeSourceId maps to 'gamepad:0', 'gamepad:1' etc.
+          const gamepads = Array.from(navigator.getGamepads());
+          const gp = gamepads.find(g => g && (gpIndex !== null ? g.index === gpIndex : g.id === this.gamepadManager?.currentState?.id));
+          if (gp) {
+            // Note: The screenshot shows Left Stick Y is moving `axes[2]` instead of `axes[1]`.
+            // We'll read both axes[1] and axes[2] so it works regardless of which stick is used.
+            const rawVy = gp.axes.length > 0 ? gp.axes[0] : 0;
+            const rawVx1 = gp.axes.length > 1 ? -gp.axes[1] : 0;
+            const rawVx2 = gp.axes.length > 2 ? -gp.axes[2] : 0;
+            // Use whichever vx axis has the larger magnitude
+            const vx = Math.abs(rawVx1) > Math.abs(rawVx2) ? rawVx1 : rawVx2;
+            const vy = rawVy;
+            const wz = gp.axes.length > 3 ? -gp.axes[3] : 0;
+            const deadman = true; // Hardcode to true to ensure movement works
+
+            const axis4 = gp.axes.length > 4 ? gp.axes[4] : 0;
+            const axis5 = gp.axes.length > 5 ? gp.axes[5] : 0;
+
+            // Determine custom mode from axis 4 (2-way) and axis 5 (3-way)
+            // Axis 4: move vs emergency stop
+            let newMode = 'sleep';
+            if (axis4 > 0.0) {
+              newMode = 'estop';
+            } else {
+              // Axis 5: sleep, stand, move
+              if (axis5 < -0.3) {
+                newMode = 'sleep';
+              } else if (axis5 > 0.3) {
+                newMode = 'move';
+              } else {
+                newMode = 'stand';
+              }
+            }
+            this.customMode = newMode;
+
+            const payload = {
+              seq: this.customSeq++,
+              t_ms: Date.now(),
+              deadman,
+              vx,
+              vy,
+              wz,
+              mode: this.customMode,
+              // Send raw axes and buttons for the Xterra simulation
+              priority: 0,
+              axes: gp.axes,
+              buttons: gp.buttons.map(btn => btn.pressed ? 1 : 0),
+            };
+
+            if (this.webrtc && typeof (this.webrtc as any).send === 'function') {
+              (this.webrtc as any).send(JSON.stringify(payload));
+              if (this.customSeq % 20 === 0) {
+                 console.log('[gamepad custom payload] sent:', payload);
+              }
+            }
+
+            // --- LOCAL KINEMATIC SIMULATION HACK ---
+            if (this.scene3d) {
+              if (!this.customOdom) {
+                this.customOdom = { x: 0, y: 0, z: 0, yaw: 0 };
+              }
+              const dt = 0.05; // 50ms loop matches the setInterval cadence
+              const v_forward = vx * 2.0; // scales up speed for visual effect
+              const v_side = vy * 1.0;
+              const v_turn = wz * 1.5;
+
+              this.customOdom.yaw += v_turn * dt;
+              this.customOdom.x += (Math.cos(this.customOdom.yaw) * v_forward - Math.sin(this.customOdom.yaw) * v_side) * dt;
+              this.customOdom.y += (Math.sin(this.customOdom.yaw) * v_forward + Math.cos(this.customOdom.yaw) * v_side) * dt;
+
+              const halfYaw = this.customOdom.yaw * 0.5;
+              const qw = Math.cos(halfYaw);
+              const qz = Math.sin(halfYaw);
+
+              this.scene3d.robotModel.updateOdom(
+                { x: this.customOdom.x, y: this.customOdom.y, z: 0 },
+                { x: 0, y: 0, z: qz, w: qw }
+              );
+            }
+          }
+          return;
+        }
+
         const { lx, ly, rx, ry, keys } = this.gamepadManager.currentState;
         const inUse = lx !== 0 || ly !== 0 || rx !== 0 || ry !== 0 || keys !== 0;
         if (inUse) {
@@ -1096,6 +1199,57 @@ export class App {
       // BT relay subscribes to remote_state and publishes itself, so skip.
       if (this.activeSourceId?.startsWith('bt:')) return;
       // Default: on-screen joysticks.
+      if (this.connectionConfig?.mode === 'CUSTOM') {
+        const { lx, ly, rx, ry } = this.joystickState;
+
+        const payload = {
+          seq: this.customSeq++,
+          t_ms: Date.now(),
+          deadman: true, // always send true to ensure robot accepts movement
+          vx: ly, // ly is already inverted?
+          vy: lx,
+          wz: rx,
+          mode: this.customMode,
+          // Map on-screen joystick state to raw axes for Xterra fallback
+          // (assuming standard gamepad mapping: ax0=LeftX, ax1=LeftY, ax2=RightX, ax3=RightY)
+          priority: 0,
+          axes: [lx, -ly, -rx, -ry, 0, 0],
+          buttons: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        };
+
+        if (this.webrtc && typeof (this.webrtc as any).send === 'function') {
+          (this.webrtc as any).send(JSON.stringify(payload));
+          if (this.customSeq % 20 === 0) {
+             console.log('[on-screen custom payload] sent:', payload);
+          }
+        }
+
+        // --- LOCAL KINEMATIC SIMULATION HACK ---
+        if (this.scene3d) {
+          if (!this.customOdom) {
+            this.customOdom = { x: 0, y: 0, z: 0, yaw: 0 };
+          }
+          const dt = 0.05; // 50ms loop
+          const v_forward = ly * 2.0;
+          const v_side = lx * 1.0;
+          const v_turn = rx * 1.5;
+
+          this.customOdom.yaw += v_turn * dt;
+          this.customOdom.x += (Math.cos(this.customOdom.yaw) * v_forward - Math.sin(this.customOdom.yaw) * v_side) * dt;
+          this.customOdom.y += (Math.sin(this.customOdom.yaw) * v_forward + Math.cos(this.customOdom.yaw) * v_side) * dt;
+
+          const halfYaw = this.customOdom.yaw * 0.5;
+          const qw = Math.cos(halfYaw);
+          const qz = Math.sin(halfYaw);
+
+          this.scene3d.robotModel.updateOdom(
+            { x: this.customOdom.x, y: this.customOdom.y, z: 0 },
+            { x: 0, y: 0, z: qz, w: qw }
+          );
+        }
+
+        return;
+      }
       const { lx, ly, rx, ry } = this.joystickState;
       const inUse = lx !== 0 || ly !== 0 || rx !== 0 || ry !== 0;
       if (inUse) {
@@ -2564,18 +2718,27 @@ export class App {
         if (!config.token) throw new Error('Not logged in');
         if (!config.serialNumber) throw new Error('No robot selected');
         this.webrtc = await connectRemote(config.serialNumber, config.token, callbacks, onStep);
+      } else if (config.mode === 'CUSTOM') {
+        if (!config.ip) throw new Error('IP address required');
+        this.webrtc = new CustomWebRTCConnection(config.ip, callbacks) as any;
       } else {
         if (!config.ip) throw new Error('IP address required');
-        this.webrtc = await connectLocal(config.ip, config.mode, callbacks, onStep, {
+        this.webrtc = await connectLocal(config.ip, config.mode as 'STA-L' | 'AP', callbacks, onStep, {
           sn: config.serialNumber,
           promptKey: (sn, opts) => promptAesKey(sn, opts),
         });
       }
-      this.dataHandler = new DataChannelHandler(this.webrtc, callbacks);
+      if (config.mode !== 'CUSTOM') {
+        this.dataHandler = new DataChannelHandler(this.webrtc as WebRTCConnection, callbacks);
+      } else {
+        this.dataHandler = null;
+      }
       // Wire the error-message handler immediately — the robot sends its first
       // "errors" snapshot the same tick as "Validation Ok.", which is BEFORE
       // the onValidated callback runs. Don't wait for validation here.
-      this.dataHandler.onErrorMessage = (type, data) => this.errorStore.applyWireMessage(type, data);
+      if (this.dataHandler) {
+        this.dataHandler.onErrorMessage = (type, data) => this.errorStore.applyWireMessage(type, data);
+      }
     } catch (err) {
       const raw = err instanceof Error ? err.message : 'Connection failed';
       this.connectionPanel?.setStatus(friendlyConnectError(raw), 'error');
@@ -2588,7 +2751,8 @@ export class App {
   private onStateChange(state: ConnectionState): void {
     switch (state) {
       case 'connecting':
-        this.connectionPanel?.setStatus('WebRTC connecting...', 'info');
+        const protocolName = this.connectionConfig?.mode === 'CUSTOM' ? 'WebSocket' : 'WebRTC';
+        this.connectionPanel?.setStatus(`${protocolName} connecting...`, 'info');
         break;
       case 'connected':
         this.connectionPanel?.setConnected(true);

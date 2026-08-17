@@ -1,4 +1,4 @@
-export type ConnectionMode = 'AP' | 'STA-L' | 'STA-T';
+export type ConnectionMode = 'AP' | 'STA-L' | 'STA-T' | 'CUSTOM';
 
 export interface ConnectionConfig {
   mode: ConnectionMode;
