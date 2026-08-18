@@ -17,6 +17,7 @@ export class ConnectionPanel {
   private modeSelect!: HTMLSelectElement;
   private ipInput!: HTMLInputElement;
   private connectBtn!: HTMLButtonElement;
+  private detectBtn!: HTMLButtonElement;
   private scanBtn!: HTMLButtonElement;
   private scanSnInput!: HTMLInputElement;
   private statusEl!: HTMLElement;
@@ -85,6 +86,7 @@ export class ConnectionPanel {
         <label for="ip-input">Robot IP Address</label>
         <div class="ip-row">
           <input type="text" id="ip-input" placeholder="192.168.12.1" />
+          <button id="detect-btn" class="btn-scan" title="Auto-detect robot IP from network gateway (use in AP mode)">Detect</button>
           <button id="scan-btn" class="btn-scan" title="Scan network (broadcast + per-SN sweep for known devices)">Scan</button>
         </div>
         <div id="scan-results" class="scan-results" style="display:none;"></div>
@@ -100,6 +102,7 @@ export class ConnectionPanel {
     this.modeSelect = this.container.querySelector('#mode-select')!;
     this.ipInput = this.container.querySelector('#ip-input')!;
     this.connectBtn = this.container.querySelector('#connect-btn')!;
+    this.detectBtn = this.container.querySelector('#detect-btn')!;
     this.scanBtn = this.container.querySelector('#scan-btn')!;
     this.scanSnInput = this.container.querySelector('#scan-sn-input')!;
     this.scanSnInput.addEventListener('input', () => {
@@ -170,6 +173,7 @@ export class ConnectionPanel {
     // Enter key triggers connect
     const handleEnter = (e: KeyboardEvent) => { if (e.key === 'Enter') { e.preventDefault(); this.handleConnect(); } };
     this.container.addEventListener('keydown', handleEnter);
+    this.detectBtn.addEventListener('click', () => this.handleDetect());
     this.scanBtn.addEventListener('click', () => this.handleScan());
     this.robotSelect.addEventListener('change', () => {
       this.selectedSn = this.robotSelect.value;
@@ -240,8 +244,11 @@ export class ConnectionPanel {
     }
 
     if (mode === 'AP') {
-      this.ipInput.value = DEFAULT_AP_IP;
-      this.ipInput.readOnly = true;
+      if (!this.ipInput.value || this.ipInput.value === DEFAULT_AP_IP) {
+        this.ipInput.value = DEFAULT_AP_IP;
+      }
+      this.ipInput.readOnly = false;
+      this.ipInput.placeholder = 'Robot IP (e.g. 192.168.123.161)';
     } else {
       this.ipInput.readOnly = false;
       if (this.ipInput.value === DEFAULT_AP_IP && mode === 'STA-L') {
@@ -324,6 +331,26 @@ export class ConnectionPanel {
         email: '',
         password: '',
       });
+    }
+  }
+
+  private async handleDetect(): Promise<void> {
+    this.detectBtn.disabled = true;
+    this.detectBtn.textContent = '...';
+    try {
+      const resp = await fetch('/gateway', { signal: AbortSignal.timeout(4000) });
+      const data = await resp.json() as { gateway: string | null };
+      if (data.gateway) {
+        this.ipInput.value = data.gateway;
+        this.setStatus(`Detected gateway: ${data.gateway}`, 'success');
+      } else {
+        this.setStatus('Could not detect gateway — enter IP manually', 'error');
+      }
+    } catch {
+      this.setStatus('Detect failed — enter IP manually', 'error');
+    } finally {
+      this.detectBtn.disabled = false;
+      this.detectBtn.textContent = 'Detect';
     }
   }
 

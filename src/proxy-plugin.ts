@@ -2,6 +2,58 @@ import type { Plugin } from 'vite';
 import http from 'node:http';
 import https from 'node:https';
 import dgram from 'node:dgram';
+import os from 'node:os';
+import { execSync } from 'node:child_process';
+
+// Known Go2 MCU IPs to probe before falling back to gateway detection.
+// Go2 EDU: main MCU is always 192.168.123.161 on the internal eth network.
+// Go2 standard AP: wlan0 hotspot gateway at 10.42.0.1.
+const GO2_CANDIDATE_IPS = ['192.168.123.161', '10.42.0.1', '192.168.12.1'];
+
+function probeHttp(ip: string, port: number, path: string, timeoutMs: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const req = http.request({ hostname: ip, port, path, method: 'POST', timeout: timeoutMs }, (res) => {
+      resolve(res.statusCode !== undefined && res.statusCode < 500);
+      res.resume();
+    });
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => { req.destroy(); resolve(false); });
+    req.end();
+  });
+}
+
+async function detectRobotIp(): Promise<string | null> {
+  // Probe known Go2 MCU IPs in parallel — return first that responds on port 9991
+  const results = await Promise.all(
+    GO2_CANDIDATE_IPS.map(async (ip) => ({ ip, ok: await probeHttp(ip, 9991, '/con_notify', 1500) }))
+  );
+  const hit = results.find((r) => r.ok);
+  if (hit) return hit.ip;
+
+  // Fall back to reading the default gateway from ipconfig
+  try {
+    const out = execSync('ipconfig', { encoding: 'utf8', timeout: 3000 });
+    const blocks = out.split(/\r?\n\r?\n/);
+    for (const block of blocks) {
+      if (!/Wi-Fi|Wireless/i.test(block)) continue;
+      const m = block.match(/Default Gateway[^:]*:\s*([\d.]+)/i);
+      if (m && m[1] && m[1] !== '0.0.0.0') return m[1];
+    }
+    const m = out.match(/Default Gateway[^:]*:\s*([\d.]+)/i);
+    if (m && m[1] && m[1] !== '0.0.0.0') return m[1];
+  } catch { /* ignore */ }
+  return null;
+}
+
+function getPhysicalIfaces(): string[] {
+  const result: string[] = [];
+  for (const list of Object.values(os.networkInterfaces())) {
+    for (const iface of (list ?? [])) {
+      if (!iface.internal && iface.family === 'IPv4') result.push(iface.address);
+    }
+  }
+  return result;
+}
 
 // ── UDP Multicast Scanner (embedded) ──
 //
@@ -97,30 +149,53 @@ function scanForRobots(family: string, timeoutMs = DEFAULT_SCAN_TIMEOUT, sn?: st
     });
 
     receiver.bind(RECV_PORT, () => {
+      const ifaces = getPhysicalIfaces();
       for (const g of groups) {
-        try { receiver.addMembership(g); } catch { /* may already be member */ }
+        // Join on every physical interface so Windows picks the right one
+        // (without this, the OS may pick the WSL/Hyper-V virtual adapter).
+        if (ifaces.length > 0) {
+          for (const iface of ifaces) {
+            try { receiver.addMembership(g, iface); } catch { /* already member or unsupported */ }
+          }
+        } else {
+          try { receiver.addMembership(g); } catch { /* may already be member */ }
+        }
       }
 
-      const sender = dgram.createSocket({ type: 'udp4', reuseAddr: true });
       const buf = Buffer.from(queryPayload);
+      // Send from every physical interface so the query reaches the robot
+      // regardless of which adapter the OS would otherwise prefer.
+      const sendFromIfaces = ifaces.length > 0 ? ifaces : ['0.0.0.0'];
       let sent = 0;
       const sendQuery = (): void => {
-        // Query every group in the family in parallel each iteration.
-        for (const g of groups) {
-          sender.send(buf, 0, buf.length, QUERY_PORT, g, (err) => {
-            if (err) console.warn(`[scanner] Send error to ${g}:`, err.message);
+        for (const iface of sendFromIfaces) {
+          const sender = dgram.createSocket({ type: 'udp4', reuseAddr: true });
+          sender.bind(0, iface, () => {
+            try { sender.setMulticastInterface(iface); } catch { /* ignore */ }
+            for (const g of groups) {
+              sender.send(buf, 0, buf.length, QUERY_PORT, g, (err) => {
+                if (err) console.warn(`[scanner] Send error to ${g} via ${iface}:`, err.message);
+              });
+            }
+            setTimeout(() => { try { sender.close(); } catch { /* ignore */ } }, 200);
           });
         }
         sent++;
-        if (sent < 3) setTimeout(sendQuery, 200);
-        else setTimeout(() => sender.close(), 100);
+        if (sent < 3) setTimeout(sendQuery, 300);
       };
       sendQuery();
     });
 
     setTimeout(() => {
+      const ifaces = getPhysicalIfaces();
       for (const g of groups) {
-        try { receiver.dropMembership(g); } catch { /* not a member */ }
+        if (ifaces.length > 0) {
+          for (const iface of ifaces) {
+            try { receiver.dropMembership(g, iface); } catch { /* ignore */ }
+          }
+        } else {
+          try { receiver.dropMembership(g); } catch { /* not a member */ }
+        }
       }
       receiver.close();
       resolve(results);
@@ -174,6 +249,17 @@ export function robotProxyPlugin(): Plugin {
               res.setHeader('Content-Type', 'application/json');
               res.end(JSON.stringify({ error: (err as Error).message }));
             });
+          return;
+        }
+
+        if (url.pathname === '/gateway' && req.method === 'GET') {
+          detectRobotIp().then((gateway) => {
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ gateway }));
+          }).catch(() => {
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ gateway: null }));
+          });
           return;
         }
 
