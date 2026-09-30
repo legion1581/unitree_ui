@@ -2,6 +2,7 @@
  * Account Manager page — 4 tabs: Devices, Info, Account, Debug
  */
 
+import forge from 'node-forge';
 import { cloudApi, getLastResponseMeta, ACCOUNT_FAMILY_LABEL, type RobotDevice, type UserInfo, type FirmwareInfo, type TutorialGroup, type ChangelogEntry, type AppVersionInfo } from '../../api/unitree-cloud';
 import { setCachedAesKey, clearCachedAesKey, rsaEncryptSn } from '../../api/aes-key-derive';
 import { buildCloudPrefsRow } from './cloud-prefs';
@@ -9,6 +10,9 @@ import { makeCopyButton } from './copy-button';
 import { OtaController, type Family as OtaFamily, type OtaState } from '../../api/ota-controller';
 
 type Tab = 'devices' | 'info' | 'account' | 'debug';
+
+/** Cloud returns Go2 series as "GO2" — compare case-insensitively. */
+const isGo2Series = (series: string): boolean => series.toUpperCase().startsWith('GO2');
 
 export class AccountPage {
   private container: HTMLElement;
@@ -689,7 +693,12 @@ export class AccountPage {
   private async renderDevicesTab(): Promise<void> {
     this.content.innerHTML = '<div style="color:#666;padding:20px;">Loading devices...</div>';
     try {
-      const devices = await cloudApi.listDevices();
+      // Token-only login never fetches user/info; the Go2 special password
+      // needs the account UID, so fetch it alongside the device list.
+      const [devices] = await Promise.all([
+        cloudApi.listDevices(),
+        cloudApi.user ? null : cloudApi.getUserInfo().catch(() => null),
+      ]);
       // Seed the local AES-key cache from any cloud-stored keys so the
       // data2=3 connect path doesn't have to prompt for SNs that have
       // already been bound (e.g. via the official Unitree app).
@@ -772,6 +781,8 @@ export class AccountPage {
     if (dev.connIp) this.infoRow(tile, 'IP', dev.connIp, true);
     if (dev.connMode) this.infoRow(tile, 'Mode', dev.connMode);
     if (dev.key) this.infoRow(tile, 'AES-128 Key', dev.key.length > 32 ? dev.key.slice(0, 32) + '...' : dev.key, true);
+    const specialPw = this.go2SpecialPassword(dev);
+    if (specialPw) this.infoRow(tile, 'Special Password', specialPw, true);
 
     // Buttons row
     const btns = document.createElement('div');
@@ -793,6 +804,14 @@ export class AccountPage {
 
     tile.appendChild(btns);
     return tile;
+  }
+
+  /** Go2-only "special password": last 6 hex chars of md5(SN + account UID).
+   *  Returns null for non-Go2 devices or when the user profile isn't loaded. */
+  private go2SpecialPassword(dev: RobotDevice): string | null {
+    const uid = cloudApi.user?.uid;
+    if (!uid || !isGo2Series(dev.series)) return null;
+    return forge.md.md5.create().update(dev.sn + uid).digest().toHex().slice(-6);
   }
 
   private copyBtn(text: string): HTMLButtonElement {
@@ -823,6 +842,8 @@ export class AccountPage {
       if (dev.code) this.infoRow(s, 'Code', dev.code, true);
       this.infoRow(s, 'Owner', dev.own === 1 ? 'Yes' : 'Shared');
       if (dev.key) this.infoRow(s, 'AES-128 Key', dev.key, true);
+      const specialPw = this.go2SpecialPassword(dev);
+      if (specialPw) this.infoRow(s, 'Special Password', specialPw, true);
       if (dev.remark) this.infoRow(s, 'Remark', dev.remark);
       this.content.appendChild(s);
 
@@ -868,7 +889,7 @@ export class AccountPage {
           // Cloud OTA — only the first (latest) entry is upgrade-eligible.
           // Skip if there's no firmwareId (defensive; shouldn't happen).
           if (fw[0].firmwareId) {
-            const family: OtaFamily = dev.series.startsWith('Go2') ? 'Go2' : 'G1';
+            const family: OtaFamily = isGo2Series(dev.series) ? 'Go2' : 'G1';
             this.content.appendChild(this.buildOtaSection(dev.sn, family, fw[0]));
           }
         }
@@ -909,7 +930,7 @@ export class AccountPage {
           // Pin AppName to the device's series so the call works regardless
           // of the account-family pill (Go2 device on G1 account or vice
           // versa). Everything other than Go2 maps onto the Explorer-line.
-          const devFamily = dev.series.startsWith('Go2') ? 'Go2' : 'G1';
+          const devFamily = isGo2Series(dev.series) ? 'Go2' : 'G1';
           const newKey = (await cloudApi.bindExtData(snEncrypted, extData, devFamily)).trim();
           if (!/^[0-9a-fA-F]{32}$/.test(newKey)) {
             aesStatus.style.color = '#e57373';

@@ -314,7 +314,7 @@ export class ConnectionPanel {
       // in order: typed value → first cloud-bound device of this family
       // → empty (connector will fall back to promptKey).
       const typedSn = this.scanSnInput.value.trim();
-      const familyDevs = this.devices.filter((d) => d.series === cloudApi.connectFamily);
+      const familyDevs = this.devices.filter((d) => d.series.toUpperCase() === cloudApi.connectFamily.toUpperCase());
       const sn = typedSn || (familyDevs.length === 1 ? familyDevs[0].sn : '');
       this.onConnect({
         mode,
