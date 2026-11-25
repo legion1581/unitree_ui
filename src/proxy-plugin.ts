@@ -2,6 +2,18 @@ import type { Plugin } from 'vite';
 import http from 'node:http';
 import https from 'node:https';
 import dgram from 'node:dgram';
+import os from 'node:os';
+
+/** Non-internal IPv4 addresses of this machine, one per interface. */
+function physicalIpv4Addresses(): string[] {
+  const out: string[] = [];
+  for (const list of Object.values(os.networkInterfaces())) {
+    for (const iface of list ?? []) {
+      if (!iface.internal && iface.family === 'IPv4') out.push(iface.address);
+    }
+  }
+  return out;
+}
 
 // ── UDP Multicast Scanner (embedded) ──
 //
@@ -96,31 +108,62 @@ function scanForRobots(family: string, timeoutMs = DEFAULT_SCAN_TIMEOUT, sn?: st
       } catch { /* ignore non-JSON */ }
     });
 
+    // Join and query on every physical IPv4 interface. With several adapters
+    // (WSL / Hyper-V / VirtualBox on Windows, Docker bridges, VPNs) the OS
+    // otherwise picks one for multicast and it is often not the one the
+    // robot is on, so the scan comes back empty.
+    const ifaces = physicalIpv4Addresses();
+
     receiver.bind(RECV_PORT, () => {
       for (const g of groups) {
-        try { receiver.addMembership(g); } catch { /* may already be member */ }
+        if (ifaces.length === 0) {
+          try { receiver.addMembership(g); } catch { /* may already be member */ }
+        }
+        for (const iface of ifaces) {
+          try { receiver.addMembership(g, iface); } catch { /* already member / unsupported */ }
+        }
       }
 
-      const sender = dgram.createSocket({ type: 'udp4', reuseAddr: true });
       const buf = Buffer.from(queryPayload);
+      const senders = (ifaces.length ? ifaces : [undefined]).map((iface) => {
+        const s = dgram.createSocket({ type: 'udp4', reuseAddr: true });
+        s.on('error', (err) => console.warn(`[scanner] Sender error via ${iface ?? 'default'}:`, err.message));
+        const ready = new Promise<void>((res) => s.bind(0, iface, () => {
+          if (iface) {
+            try { s.setMulticastInterface(iface); } catch { /* ignore */ }
+          }
+          res();
+        }));
+        return { s, iface, ready };
+      });
+
       let sent = 0;
       const sendQuery = (): void => {
-        // Query every group in the family in parallel each iteration.
-        for (const g of groups) {
-          sender.send(buf, 0, buf.length, QUERY_PORT, g, (err) => {
-            if (err) console.warn(`[scanner] Send error to ${g}:`, err.message);
+        // Query every group in the family, from every interface, each iteration.
+        for (const { s, iface, ready } of senders) {
+          ready.then(() => {
+            for (const g of groups) {
+              s.send(buf, 0, buf.length, QUERY_PORT, g, (err) => {
+                if (err) console.warn(`[scanner] Send error to ${g} via ${iface ?? 'default'}:`, err.message);
+              });
+            }
           });
         }
         sent++;
         if (sent < 3) setTimeout(sendQuery, 200);
-        else setTimeout(() => sender.close(), 100);
+        else setTimeout(() => senders.forEach(({ s }) => { try { s.close(); } catch { /* ignore */ } }), 100);
       };
       sendQuery();
     });
 
     setTimeout(() => {
       for (const g of groups) {
-        try { receiver.dropMembership(g); } catch { /* not a member */ }
+        if (ifaces.length === 0) {
+          try { receiver.dropMembership(g); } catch { /* not a member */ }
+        }
+        for (const iface of ifaces) {
+          try { receiver.dropMembership(g, iface); } catch { /* not a member */ }
+        }
       }
       receiver.close();
       resolve(results);

@@ -90,18 +90,24 @@ async function decryptData1(
 }
 
 async function detectPort(ip: string): Promise<'new' | 'old'> {
-  // Try port 9991 first (newer firmware), then 8081 (older firmware)
+  // Try port 9991 first (newer firmware), then 8081 (older firmware).
+  // Keep what each probe saw so a failure says why, not just "not responding".
+  let newStatus = 'not tried';
+  let oldStatus = 'not tried';
   try {
     const resp = await fetch(proxyUrl('/con_notify'), {
       method: 'POST',
       headers: proxyHeaders(`${ip}:${LOCAL_PORT}`),
       signal: AbortSignal.timeout(3000),
     });
+    newStatus = `HTTP ${resp.status}`;
     if (resp.ok) {
       log.webrtc.info(`${tag()} Port ${LOCAL_PORT} available (new method)`);
       return 'new';
     }
-  } catch { /* port not available */ }
+  } catch (e) {
+    newStatus = e instanceof Error ? e.message : 'error';
+  }
 
   try {
     const resp = await fetch(proxyUrl('/'), {
@@ -109,14 +115,20 @@ async function detectPort(ip: string): Promise<'new' | 'old'> {
       headers: proxyHeaders(`${ip}:${LOCAL_OFFER_PORT}`),
       signal: AbortSignal.timeout(3000),
     });
+    oldStatus = `HTTP ${resp.status}`;
     // Even a 404 means the port is reachable
     if (resp.status !== 502) {
       log.webrtc.info(`${tag()} Port ${LOCAL_OFFER_PORT} available (old method)`);
       return 'old';
     }
-  } catch { /* port not available */ }
+  } catch (e) {
+    oldStatus = e instanceof Error ? e.message : 'error';
+  }
 
-  throw new Error(`Robot not responding at ${ip} — verify IP and that the robot is powered on`);
+  log.webrtc.warn(`${tag()} Port probe failed — ${ip}:${LOCAL_PORT}: ${newStatus} | ${ip}:${LOCAL_OFFER_PORT}: ${oldStatus}`);
+  throw new Error(
+    `Robot not responding at ${ip} (port ${LOCAL_PORT}: ${newStatus}, port ${LOCAL_OFFER_PORT}: ${oldStatus}) — verify IP and that the robot is powered on`,
+  );
 }
 
 export async function connectLocal(
